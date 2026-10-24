@@ -121,8 +121,8 @@ THEME_PALETTES = {
         "surface": "#1E293B",
         "surface_alt": "#273549",
         "surface_alt_hover": "#334155",
-        "text": "#E2E8F0",
-        "muted": "#94A3B8",
+        "text": "#FFFFFF",
+        "muted": "#FFFFFF",
         "border": "#334155",
         "on_accent": "#F8FAFC",
         "glass": (10, 16, 30, 165),
@@ -495,6 +495,31 @@ def clear_screen():
             widget.destroy()
 
     draw_background()
+
+    if THEME == "dark":
+        root.after_idle(lambda: apply_dark_text_colors(root))
+
+
+def apply_dark_text_colors(widget):
+    """Make all widget and canvas text white while dark mode is active."""
+
+    if THEME != "dark":
+        return
+
+    if isinstance(widget, tk.Canvas):
+        for item in widget.find_all():
+            if widget.type(item) == "text":
+                widget.itemconfigure(item, fill="#FFFFFF")
+
+    if isinstance(widget, tk.Text):
+        for tag in widget.tag_names():
+            widget.tag_configure(tag, foreground="#FFFFFF")
+
+    if "foreground" in widget.keys():
+        widget.configure(foreground="#FFFFFF")
+
+    for child in widget.winfo_children():
+        apply_dark_text_colors(child)
 
 
 # --------------------------------------------------
@@ -1372,6 +1397,10 @@ def show_form_dialog(title, fields):
         focus_widget.focus_set()
 
     center_window(dialog, 520, 90 + 62 * len(fields))
+
+    if THEME == "dark":
+        apply_dark_text_colors(dialog)
+
     dialog.wait_window(dialog)
 
     return result or None
@@ -1806,7 +1835,7 @@ def show_login_selection():
     background_canvas.create_text(
         550,
         315,
-        text="WELCOME BACK",
+        text="WELCOME",
         font=sfont(19),
         fill=TEXT
     )
