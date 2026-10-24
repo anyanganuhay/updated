@@ -1,0 +1,154 @@
+{
+    "users": [
+        {
+            "id": 1,
+            "username": "admin",
+            "password": "pbkdf2_sha256$120000$635bb4972dfc7ac4da107479991a0f36$6a4f572ca659ef5ac68e46a9f7b60d21e70fc986964281a3fc76bcf8cc8c53d7",
+            "role": "Admin",
+            "full_name": "System Administrator",
+            "active": true,
+            "protected": true,
+            "student_id": "",
+            "subjects": [],
+            "block": ""
+        },
+        {
+            "id": 2,
+            "username": "teacher",
+            "password": "pbkdf2_sha256$120000$00efa382a50e4a65cd547eaa9b67cb01$63cde432dc9f0d81c4cdf87be59a546b923c442ac46eee07c339914f24ae4c86",
+            "role": "Teacher",
+            "full_name": "SMCII Teacher",
+            "active": true,
+            "protected": true,
+            "student_id": "",
+            "subjects": [],
+            "block": ""
+        },
+        {
+            "id": 3,
+            "username": "student",
+            "password": "student123",
+            "role": "Student",
+            "full_name": "Sample Student",
+            "active": true,
+            "protected": true,
+            "student_id": "2024-0001",
+            "subjects": [],
+            "block": "Block A"
+        },
+        {
+            "id": 4,
+            "username": "Ganuhay",
+            "password": "pbkdf2_sha256$120000$ba56e72a2e2d4e2dbf3f51b8f2568ccf$c19633a858337019e27c13c3e0cfb63a5154034a040323ff55ac2c63e5371ef0",
+            "full_name": "Gian Ganuhay",
+            "role": "Student",
+            "active": true,
+            "protected": false,
+            "student_id": "C25-0718",
+            "block": "Block A",
+            "subjects": []
+        },
+        {
+            "id": 5,
+            "username": "Gonzales",
+            "password": "pbkdf2_sha256$120000$62b363233917c73240c8a5e92234b333$ad204e767b7ef57d640d2dd9efacdd84ae38c19b7ea4b6645b543d675f273cac",
+            "full_name": "Gerald Gonzales",
+            "role": "Student",
+            "active": true,
+            "protected": false,
+            "student_id": "C25-0158",
+            "block": "Block A",
+            "subjects": []
+        },
+        {
+            "id": 6,
+            "username": "selwyn",
+            "password": "pbkdf2_sha256$120000$833a6707bcf92e724380b7e3b0cee673$3674da89107d6c7d3347d33e215ea8249f5f2f5eba924fa38c096b5d59e22529",
+            "full_name": "Selwyn Cuesta",
+            "role": "Student",
+            "active": true,
+            "protected": false,
+            "student_id": "C25-0101",
+            "block": "Block B",
+            "subjects": []
+        }
+    ],
+    "grades": [],
+    "subjects": [
+        "Mathematics",
+        "English",
+        "Science",
+        "Filipino",
+        "Social Studies",
+        "Computer"
+    ],
+    "activity_log": [
+        {
+            "id": 1,
+            "timestamp": "2026-10-24 15:31:23",
+            "actor": "admin",
+            "action": "Account created",
+            "detail": "Gian Ganuhay (Ganuhay) added as Student"
+        },
+        {
+            "id": 2,
+            "timestamp": "2026-10-24 15:31:23",
+            "actor": "admin",
+            "action": "Student ID number assigned",
+            "detail": "Ganuhay uses ID number C25-0718"
+        },
+        {
+            "id": 3,
+            "timestamp": "2026-10-24 15:31:23",
+            "actor": "admin",
+            "action": "Student assigned to block",
+            "detail": "Ganuhay assigned to Block A"
+        },
+        {
+            "id": 4,
+            "timestamp": "2026-10-24 15:32:33",
+            "actor": "admin",
+            "action": "Account created",
+            "detail": "Gerald Gonzales (Gonzales) added as Student"
+        },
+        {
+            "id": 5,
+            "timestamp": "2026-10-24 15:32:33",
+            "actor": "admin",
+            "action": "Student ID number assigned",
+            "detail": "Gonzales uses ID number C25-0158"
+        },
+        {
+            "id": 6,
+            "timestamp": "2026-10-24 15:32:33",
+            "actor": "admin",
+            "action": "Student assigned to block",
+            "detail": "Gonzales assigned to Block A"
+        },
+        {
+            "id": 7,
+            "timestamp": "2026-10-24 15:41:46",
+            "actor": "admin",
+            "action": "Account created",
+            "detail": "Selwyn Cuesta (selwyn) added as Student"
+        },
+        {
+            "id": 8,
+            "timestamp": "2026-10-24 15:41:46",
+            "actor": "admin",
+            "action": "Account ID number assigned",
+            "detail": "selwyn uses ID number C25-0101"
+        },
+        {
+            "id": 9,
+            "timestamp": "2026-10-24 15:41:46",
+            "actor": "admin",
+            "action": "Student assigned to block",
+            "detail": "selwyn assigned to Block B"
+        }
+    ],
+    "announcements": [],
+    "settings": {
+        "theme": "light"
+    }
+}

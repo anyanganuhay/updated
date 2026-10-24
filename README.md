@@ -1,1 +1,5 @@
-# updated
+# AUTOMATED SMCII GRADE CALCULATION PERFORMANCE SYSTEM
+
+Assessment scores are entered as percentages from 0 to 100. The existing term weights remain 30% written works (activities and quizzes), 30% exams, and 40% performance tasks. Term and overall grades are displayed using this college grade-point conversion: 97–100 = 1.00, 94–<97 = 1.25, 91–<94 = 1.50, 88–<91 = 1.75, 85–<88 = 2.00, 82–<85 = 2.25, 79–<82 = 2.50, 76–<79 = 2.75, 75–<76 = 3.00 (passing), and below 75 = 5.00 (failing). Grades continue to be stored internally as percentages to preserve existing records and calculations.
+
+New student accounts are randomly assigned to Block A or Block B. Existing student accounts without a block are assigned one at startup. Student IDs are generated from C25-0101 upward, and teacher IDs from T25-0201 upward; the next available ID in each sequence is used. IDs and student blocks are saved with the account and shown in the admin account lists. Students also see their block on their dashboard.
