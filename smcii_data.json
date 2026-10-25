@@ -3,118 +3,32 @@
         {
             "id": 1,
             "username": "admin",
-            "password": "pbkdf2_sha256$120000$635bb4972dfc7ac4da107479991a0f36$6a4f572ca659ef5ac68e46a9f7b60d21e70fc986964281a3fc76bcf8cc8c53d7",
+            "password": "pbkdf2_sha256$120000$3999e90e1a02fb1a1a8cec1b0ba445be$314dbdc4d25af9535ff1724540e9ad85ff3c5a89ef70fdecac5102e22067ed94",
             "role": "Admin",
             "full_name": "System Administrator",
             "active": true,
             "protected": true,
             "student_id": "",
             "subjects": [],
-            "block": ""
+            "teacher_id": ""
         },
         {
             "id": 2,
-            "username": "teacher",
-            "password": "pbkdf2_sha256$120000$00efa382a50e4a65cd547eaa9b67cb01$63cde432dc9f0d81c4cdf87be59a546b923c442ac46eee07c339914f24ae4c86",
-            "role": "Teacher",
-            "full_name": "SMCII Teacher",
-            "active": true,
-            "protected": true,
-            "student_id": "",
-            "subjects": [],
-            "block": ""
-        },
-        {
-            "id": 3,
-            "username": "student",
-            "password": "student123",
-            "role": "Student",
-            "full_name": "Sample Student",
-            "active": true,
-            "protected": true,
-            "student_id": "2024-0001",
-            "subjects": [],
-            "block": "Block A"
-        },
-        {
-            "id": 4,
-            "username": "Ganuhay",
-            "password": "pbkdf2_sha256$120000$ba56e72a2e2d4e2dbf3f51b8f2568ccf$c19633a858337019e27c13c3e0cfb63a5154034a040323ff55ac2c63e5371ef0",
-            "full_name": "Gian Ganuhay",
-            "role": "Student",
-            "active": true,
-            "protected": false,
-            "student_id": "C25-0718",
-            "block": "Block A",
-            "subjects": []
-        },
-        {
-            "id": 5,
-            "username": "Gonzales",
-            "password": "pbkdf2_sha256$120000$62b363233917c73240c8a5e92234b333$ad204e767b7ef57d640d2dd9efacdd84ae38c19b7ea4b6645b543d675f273cac",
-            "full_name": "Gerald Gonzales",
-            "role": "Student",
-            "active": true,
-            "protected": false,
-            "student_id": "C25-0158",
-            "block": "Block A",
-            "subjects": []
-        },
-        {
-            "id": 6,
-            "username": "selwyn",
-            "password": "pbkdf2_sha256$120000$833a6707bcf92e724380b7e3b0cee673$3674da89107d6c7d3347d33e215ea8249f5f2f5eba924fa38c096b5d59e22529",
-            "full_name": "Selwyn Cuesta",
-            "role": "Student",
-            "active": true,
-            "protected": false,
-            "student_id": "C25-0101",
-            "block": "Block B",
-            "subjects": []
-        },
-        {
-            "id": 7,
             "username": "Cua",
-            "password": "pbkdf2_sha256$120000$edf7048a8c5e4cdc2b4e942e0d486b5d$f7e9761034242ea6010721e1fe1f93e6884f3def838eab51c9123f14c5d37bf6",
+            "password": "pbkdf2_sha256$120000$9d34b0deb9f8af5e3d97f4bf3eb641d8$546e4696bf94c9cf824c2ff20d8171b9c220b25b62a3a831cc4f7660f95037ce",
             "full_name": "Justine Cua",
             "role": "Teacher",
             "active": true,
             "protected": false,
-            "student_id": "T25-0201",
-            "block": "",
+            "student_id": "",
             "subjects": [
                 "Mathematics"
-            ]
+            ],
+            "teacher_id": "T26-0001"
         }
     ],
-    "grades": [
-        {
-            "id": 1,
-            "student_username": "Ganuhay",
-            "subject": "Mathematics",
-            "teacher_username": "Cua",
-            "terms": {
-                "Prelim": {
-                    "activities": [
-                        85.0
-                    ],
-                    "quizzes": [
-                        89.0
-                    ],
-                    "performance_tasks": [
-                        90.0
-                    ],
-                    "exams": [
-                        95.0
-                    ],
-                    "term_grade": 90.6
-                }
-            },
-            "final_grade": 90.6,
-            "terms_completed": 1,
-            "updated_at": "2026-10-24 23:40:27"
-        }
-    ],
+    "grades": [],
+    "assessment_scores": [],
     "subjects": [
         "Mathematics",
         "English",
@@ -126,108 +40,30 @@
     "activity_log": [
         {
             "id": 1,
-            "timestamp": "2026-10-24 15:31:23",
-            "actor": "admin",
-            "action": "Account created",
-            "detail": "Gian Ganuhay (Ganuhay) added as Student"
-        },
-        {
-            "id": 2,
-            "timestamp": "2026-10-24 15:31:23",
-            "actor": "admin",
-            "action": "Student ID number assigned",
-            "detail": "Ganuhay uses ID number C25-0718"
-        },
-        {
-            "id": 3,
-            "timestamp": "2026-10-24 15:31:23",
-            "actor": "admin",
-            "action": "Student assigned to block",
-            "detail": "Ganuhay assigned to Block A"
-        },
-        {
-            "id": 4,
-            "timestamp": "2026-10-24 15:32:33",
-            "actor": "admin",
-            "action": "Account created",
-            "detail": "Gerald Gonzales (Gonzales) added as Student"
-        },
-        {
-            "id": 5,
-            "timestamp": "2026-10-24 15:32:33",
-            "actor": "admin",
-            "action": "Student ID number assigned",
-            "detail": "Gonzales uses ID number C25-0158"
-        },
-        {
-            "id": 6,
-            "timestamp": "2026-10-24 15:32:33",
-            "actor": "admin",
-            "action": "Student assigned to block",
-            "detail": "Gonzales assigned to Block A"
-        },
-        {
-            "id": 7,
-            "timestamp": "2026-10-24 15:41:46",
-            "actor": "admin",
-            "action": "Account created",
-            "detail": "Selwyn Cuesta (selwyn) added as Student"
-        },
-        {
-            "id": 8,
-            "timestamp": "2026-10-24 15:41:46",
-            "actor": "admin",
-            "action": "Account ID number assigned",
-            "detail": "selwyn uses ID number C25-0101"
-        },
-        {
-            "id": 9,
-            "timestamp": "2026-10-24 15:41:46",
-            "actor": "admin",
-            "action": "Student assigned to block",
-            "detail": "selwyn assigned to Block B"
-        },
-        {
-            "id": 10,
-            "timestamp": "2026-10-24 23:38:43",
+            "timestamp": "2026-10-25 23:37:17",
             "actor": "admin",
             "action": "Account created",
             "detail": "Justine Cua (Cua) added as Teacher"
         },
         {
-            "id": 11,
-            "timestamp": "2026-10-24 23:38:43",
-            "actor": "admin",
-            "action": "Account ID number assigned",
-            "detail": "Cua uses ID number T25-0201"
-        },
-        {
-            "id": 12,
-            "timestamp": "2026-10-24 23:38:43",
+            "id": 2,
+            "timestamp": "2026-10-25 23:37:17",
             "actor": "admin",
             "action": "Subject assigned",
             "detail": "Cua assigned to Mathematics"
-        },
-        {
-            "id": 13,
-            "timestamp": "2026-10-24 23:40:27",
-            "actor": "Cua",
-            "action": "Term grade saved",
-            "detail": "Ganuhay - Mathematics - Prelim college grade 1.75 by Cua"
         }
     ],
-    "announcements": [
-        {
-            "id": 1,
-            "title": "New Prelim grade posted",
-            "body": "Your Prelim grade for Mathematics has been saved by Justine Cua.",
-            "audience": "Students",
-            "author": "Cua",
-            "recipient": "Ganuhay",
-            "timestamp": "2026-10-24 23:40:27"
-        }
-    ],
+    "announcements": [],
     "settings": {
-        "theme": "dark"
+        "theme": "light",
+        "school_year": "2026-2027",
+        "current_semester": "First Semester",
+        "semester_statuses": {
+            "First Semester": "Not Started",
+            "Second Semester": "Not Started"
+        },
+        "account_id_counters": {
+            "T26": 1
+        }
     }
 }

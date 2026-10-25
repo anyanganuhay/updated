@@ -4,7 +4,7 @@ import os
 import math
 import time
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 
 from PIL import Image, ImageTk, ImageFilter, ImageDraw, ImageEnhance
 
@@ -47,6 +47,7 @@ from backend import (
     ANNOUNCEMENT_AUDIENCES,
     find_student_by_reference,
     student_id_of,
+    account_id_of,
     build_user_report,
     build_grade_report,
     build_statistics_report,
@@ -56,6 +57,22 @@ from backend import (
     assessment_type_average,
     overall_grade_for_terms,
     completed_term_grades,
+    calculate_assessment_percentage,
+    add_assessment_score,
+    edit_assessment_score,
+    delete_assessment_score,
+    assessment_records_for_student,
+    assessment_records_for_teacher,
+    tally_term_grade_for_student,
+    grade_point_equivalent,
+    SEMESTER_NAMES,
+    current_school_year,
+    semester_status_for,
+    semester_open_for_entry,
+    semester_completion_status,
+    start_semester,
+    complete_semester,
+    reopen_semester,
     TERM_NAMES,
     ASSESSMENT_NAMES,
     ASSESSMENT_LABELS,
@@ -63,11 +80,7 @@ from backend import (
     ASSESSMENT_WEIGHTS,
     ASSESSMENT_WEIGHT_LABELS,
     ROLES,
-    STUDENT_BLOCKS,
     PASSING_GRADE,
-    college_grade_for_percentage,
-    format_college_grade,
-    minimum_percentage_for_college_grade,
     format_display_time,
 )
 
@@ -82,12 +95,12 @@ BASE_HEIGHT = 700
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKGROUND_FILE = os.path.join(BASE_DIR, "background.jpg")
 
-BACKGROUND_ANIMATION = True
+BACKGROUND_ANIMATION = False
 BACKGROUND_FPS = 60
 BACKGROUND_ZOOM = 1.4
 BACKGROUND_ORBIT_SPEED = 0.35
 BACKGROUND_GLASS_REFRESH = 1
-GLASS_BLUR_RADIUS = 15
+GLASS_BLUR_RADIUS = 8
 
 BLUE = "#2563EB"
 GREEN = "#16A34A"
@@ -103,17 +116,17 @@ ROLE_COLORS = {
 
 THEME_PALETTES = {
     "light": {
-        "header_bg": "#10213F",
-        "page_bg": "#EEF4FA",
+        "header_bg": "#1D4ED8",
+        "page_bg": "#FFFFFF",
         "surface": "#FFFFFF",
-        "surface_alt": "#E8EEF7",
-        "surface_alt_hover": "#DCE6F5",
-        "text": "#10213F",
-        "muted": "#64748B",
-        "border": "#D5DEEA",
+        "surface_alt": "#EFF6FF",
+        "surface_alt_hover": "#DBEAFE",
+        "text": "#172B4D",
+        "muted": "#5B6F8D",
+        "border": "#C7D9F5",
         "on_accent": "#FFFFFF",
-        "glass": (255, 255, 255, 115),
-        "shadow": "#AAB7C8"
+        "glass": (255, 255, 255, 165),
+        "shadow": "#B8CBE8"
     },
     "dark": {
         "header_bg": "#0B1220",
@@ -121,9 +134,9 @@ THEME_PALETTES = {
         "surface": "#1E293B",
         "surface_alt": "#273549",
         "surface_alt_hover": "#334155",
-        "text": "#FFFFFF",
-        "muted": "#FFFFFF",
-        "border": "#334155",
+        "text": "#F8FAFC",
+        "muted": "#CBD5E1",
+        "border": "#475569",
         "on_accent": "#F8FAFC",
         "glass": (10, 16, 30, 165),
         "shadow": "#060B16"
@@ -301,7 +314,12 @@ def apply_theme_tint(image):
             0.45
         )
 
-    return image
+    blue_white_tint = Image.new(
+        "RGB",
+        image.size,
+        (239, 246, 255)
+    )
+    return Image.blend(image, blue_white_tint, 0.48)
 
 
 def build_display_source():
@@ -348,20 +366,15 @@ def build_display_source():
     background_photo = ImageTk.PhotoImage(display_source)
 
 
-def refresh_background():
-    """Rebuild the background image for the active theme."""
-
-    build_display_source()
-
-    draw_background()
 
 
 def draw_background():
-    background_canvas.delete("all")
+    for item in background_canvas.find_withtag("background"):
+        background_canvas.delete(item)
 
     offset_x, offset_y = background_offset()
 
-    tk.Canvas.create_image(
+    background_item = tk.Canvas.create_image(
         background_canvas,
         -offset_x,
         -offset_y,
@@ -369,9 +382,15 @@ def draw_background():
         anchor="nw",
         tags="background"
     )
+    background_canvas.tag_lower(background_item)
 
-    background_canvas.glass_images = []
-    background_canvas.glass_panels = []
+
+
+def refresh_background():
+    """Rebuild the background image for the active theme while preserving glass panels."""
+    build_display_source()
+    draw_background()
+    refresh_glass_panels(background_canvas)
 
 
 # --------------------------------------------------
@@ -398,6 +417,14 @@ def background_offset(moment=None):
 
     if display_source is None:
         return 0, 0
+
+    if not BACKGROUND_ANIMATION:
+        travel_x = max(0, display_source.width - WINDOW_WIDTH)
+        travel_y = max(0, display_source.height - WINDOW_HEIGHT)
+        return (
+            int(round(travel_x / 2)),
+            int(round(travel_y / 2))
+        )
 
     if moment is None:
         moment = background_animation["time"]
@@ -487,6 +514,24 @@ def stop_background_animation():
         background_animation["job"] = None
 
 
+def clear_glass_panels():
+    """Remove only the frosted glass overlay for a full screen refresh."""
+    for panel in list(getattr(background_canvas, "glass_panels", [])):
+        try:
+            background_canvas.delete(panel["item"])
+        except (tk.TclError, ValueError):
+            pass
+
+        previous = panel.get("photo")
+        if previous is not None:
+            try:
+                background_canvas.glass_images.remove(previous)
+            except ValueError:
+                pass
+
+    background_canvas.glass_panels = []
+
+
 def clear_screen():
     stop_background_animation()
 
@@ -494,32 +539,8 @@ def clear_screen():
         if widget is not background_canvas:
             widget.destroy()
 
+    clear_glass_panels()
     draw_background()
-
-    if THEME == "dark":
-        root.after_idle(lambda: apply_dark_text_colors(root))
-
-
-def apply_dark_text_colors(widget):
-    """Make all widget and canvas text white while dark mode is active."""
-
-    if THEME != "dark":
-        return
-
-    if isinstance(widget, tk.Canvas):
-        for item in widget.find_all():
-            if widget.type(item) == "text":
-                widget.itemconfigure(item, fill="#FFFFFF")
-
-    if isinstance(widget, tk.Text):
-        for tag in widget.tag_names():
-            widget.tag_configure(tag, foreground="#FFFFFF")
-
-    if "foreground" in widget.keys():
-        widget.configure(foreground="#FFFFFF")
-
-    for child in widget.winfo_children():
-        apply_dark_text_colors(child)
 
 
 # --------------------------------------------------
@@ -897,6 +918,31 @@ def format_assessment(value):
     return "—"
 
 
+def format_grade_point(value):
+    """Display the official SMCII grade-point equivalent for a percentage."""
+
+    if not isinstance(value, (int, float)):
+        return "—"
+
+    point = grade_point_equivalent(float(value))
+
+    if point is None:
+        return "—"
+
+    return f"{point:.2f}"
+
+
+def format_overall_grade_display(value):
+    """Display the final percentage alongside the official grade point."""
+
+    if not isinstance(value, (int, float)):
+        return "—"
+
+    return (
+        f"{float(value):.2f}% | Grade Point: {format_grade_point(value)}"
+    )
+
+
 def make_stat_card(parent, title, value, row, column, color=BLUE):
     card = tk.Frame(
         parent,
@@ -913,23 +959,81 @@ def make_stat_card(parent, title, value, row, column, color=BLUE):
         sticky="nsew"
     )
 
+    tk.Frame(card, bg=color, height=spad(4)).pack(fill="x")
+
+    details = tk.Frame(card, bg=SURFACE)
+    details.pack(fill="both", expand=True, padx=spad(12), pady=spad(8))
+
     tk.Label(
-        card,
+        details,
         text=title.upper(),
-        font=sfont(8),
+        font=sfont(8, "bold"),
         bg=SURFACE,
         fg=MUTED
-    ).pack(pady=(spad(10), spad(0)))
+    ).pack(anchor="w")
 
     tk.Label(
-        card,
+        details,
         text=str(value),
-        font=sfont(20),
+        font=sfont(18),
         bg=SURFACE,
         fg=color
-    ).pack(pady=(spad(0), spad(10)))
+    ).pack(anchor="w", pady=(spad(5), 0))
 
     return card
+
+
+def make_dashboard_banner(parent, title, subtitle, refresh_command):
+    banner = tk.Frame(
+        parent,
+        bg=HEADER_BG,
+        highlightbackground=BORDER,
+        highlightthickness=1
+    )
+    banner.pack(fill="x", padx=spad(20), pady=(spad(10), spad(10)))
+
+    tk.Frame(banner, bg=BLUE, width=spad(5)).pack(side="left", fill="y")
+
+    details = tk.Frame(banner, bg=HEADER_BG)
+    details.pack(side="left", fill="both", expand=True, padx=spad(16), pady=spad(10))
+
+    tk.Label(
+        details,
+        text=title,
+        font=sfont(17),
+        bg=HEADER_BG,
+        fg=ON_ACCENT
+    ).pack(anchor="w")
+
+    tk.Label(
+        details,
+        text=subtitle,
+        font=sfont(9, "normal"),
+        bg=HEADER_BG,
+        fg="#C4D2E5" if THEME == "dark" else "#D8E4F5"
+    ).pack(anchor="w", pady=(spad(3), 0))
+
+    make_button(
+        banner,
+        "REFRESH",
+        refresh_command,
+        BLUE
+    ).pack(side="right", padx=spad(14), pady=spad(10))
+
+    return banner
+
+
+def style_dashboard_panel(panel):
+    panel.configure(
+        relief="flat",
+        bd=0,
+        highlightbackground=BORDER,
+        highlightcolor=BLUE,
+        highlightthickness=1,
+        padx=spad(12),
+        pady=spad(8)
+    )
+    return panel
 
 
 def make_module_card(parent, title, description, color, command, row, column):
@@ -1305,6 +1409,7 @@ def show_form_dialog(title, fields):
             dialog,
             text=label + ":",
             bg=SURFACE,
+            fg=TEXT,
             font=sfont(10, "normal"),
             anchor="w"
         ).grid(
@@ -1397,10 +1502,6 @@ def show_form_dialog(title, fields):
         focus_widget.focus_set()
 
     center_window(dialog, 520, 90 + 62 * len(fields))
-
-    if THEME == "dark":
-        apply_dark_text_colors(dialog)
-
     dialog.wait_window(dialog)
 
     return result or None
@@ -1437,16 +1538,34 @@ def configure_ttk_styles():
         font=sfont(9)
     )
 
+    style.configure(
+        "Treeview",
+        background=SURFACE,
+        foreground=TEXT,
+        fieldbackground=SURFACE,
+        rowheight=int(round(32 * SCALE)),
+        borderwidth=0,
+        font=sfont(9, "normal")
+    )
+
     style.map(
         "Treeview.Heading",
         background=[("active", HEADER_BG)],
-        foreground=[("active", ON_ACCENT)]
+        foreground=[("active", ON_ACCENT), ("selected", ON_ACCENT)]
+    )
+
+    style.configure(
+        "Treeview.Heading",
+        background=HEADER_BG,
+        foreground=ON_ACCENT,
+        padding=(spad(8), spad(7)),
+        font=sfont(9)
     )
 
     style.map(
         "Treeview",
-        background=[("selected", BLUE)],
-        foreground=[("selected", ON_ACCENT)]
+        background=[("selected", BLUE), ("alternate", SURFACE_ALT)],
+        foreground=[("selected", ON_ACCENT), ("!disabled", TEXT)]
     )
 
     style.configure(
@@ -1477,6 +1596,109 @@ def configure_ttk_styles():
     root.option_add("*TCombobox*Listbox.selectForeground", ON_ACCENT)
 
 
+def map_theme_color(value, old_palette, new_palette):
+    """Map a color from the current theme palette to the new one."""
+    if not value:
+        return None
+
+    for key, old_color in old_palette.items():
+        if value.lower() == str(old_color).lower():
+            return new_palette.get(key, value)
+
+    return value
+
+
+def collect_theme_widgets(root_widget):
+    """Collect each visible widget exactly once for one-pass theme recoloring."""
+    visited = set()
+    stack = [root_widget]
+    widgets = []
+
+    while stack:
+        widget = stack.pop()
+        widget_id = id(widget)
+        if widget_id in visited:
+            continue
+        visited.add(widget_id)
+        widgets.append(widget)
+        try:
+            children = widget.winfo_children()
+        except Exception:
+            continue
+        stack.extend(reversed(children))
+
+    return widgets
+
+
+def apply_theme_to_widget(widget, old_palette, new_palette):
+    """Refresh an already-created widget to match the active theme."""
+    if widget is None:
+        return
+
+    for option in ("bg", "background"):
+        try:
+            current = widget.cget(option)
+        except (TypeError, tk.TclError):
+            continue
+        mapped = map_theme_color(current, old_palette, new_palette)
+        if mapped is not None and mapped != current:
+            try:
+                widget.configure(**{option: mapped})
+            except (tk.TclError, TypeError):
+                pass
+
+    for option in ("fg", "foreground", "activeforeground", "insertbackground", "selectforeground", "disabledforeground", "highlightbackground", "highlightcolor", "troughcolor", "arrowcolor"):
+        try:
+            current = widget.cget(option)
+        except (TypeError, tk.TclError):
+            continue
+        mapped = map_theme_color(current, old_palette, new_palette)
+        if mapped is not None and mapped != current:
+            try:
+                widget.configure(**{option: mapped})
+            except (tk.TclError, TypeError):
+                pass
+
+    for option in ("activebackground", "selectbackground", "disabledbackground", "fieldbackground"):
+        try:
+            current = widget.cget(option)
+        except (TypeError, tk.TclError):
+            continue
+        mapped = map_theme_color(current, old_palette, new_palette)
+        if mapped is not None and mapped != current:
+            try:
+                widget.configure(**{option: mapped})
+            except (tk.TclError, TypeError):
+                pass
+
+
+def apply_theme_to_canvas(canvas, old_palette, new_palette):
+    """Refresh canvas-drawn text and shapes to match the active theme."""
+    if canvas is None:
+        return
+
+    color_options = (
+        "fill",
+        "outline",
+        "activefill",
+        "activeoutline",
+        "stipple"
+    )
+
+    for item in canvas.find_all():
+        for option in color_options:
+            try:
+                current = canvas.itemcget(item, option)
+            except (TypeError, tk.TclError):
+                continue
+            mapped = map_theme_color(current, old_palette, new_palette)
+            if mapped is not None and mapped != current:
+                try:
+                    canvas.itemconfigure(item, **{option: mapped})
+                except (tk.TclError, TypeError):
+                    pass
+
+
 def apply_theme(name, rebuild=None):
     """Switch the interface between the light and dark theme."""
 
@@ -1484,6 +1706,11 @@ def apply_theme(name, rebuild=None):
     global SURFACE_ALT_HOVER, TEXT, MUTED, BORDER, ON_ACCENT
     global GLASS_TINT, CANVAS_SHADOW
 
+    if name == THEME:
+        return
+
+    previous_name = THEME if THEME in THEME_PALETTES else "light"
+    old_palette = THEME_PALETTES.get(previous_name, THEME_PALETTES["light"])
     palette = THEME_PALETTES.get(name, THEME_PALETTES["light"])
 
     THEME = name
@@ -1500,7 +1727,10 @@ def apply_theme(name, rebuild=None):
     CANVAS_SHADOW = palette["shadow"]
 
     root.configure(bg=PAGE_BG)
-
+    for widget in collect_theme_widgets(root):
+        if isinstance(widget, tk.Canvas):
+            apply_theme_to_canvas(widget, old_palette, palette)
+        apply_theme_to_widget(widget, old_palette, palette)
     refresh_background()
     configure_ttk_styles()
 
@@ -1521,7 +1751,7 @@ def toggle_theme():
 
     next_theme = "dark" if THEME == "light" else "light"
 
-    apply_theme(next_theme, CURRENT_SCREEN)
+    apply_theme(next_theme, rebuild=CURRENT_SCREEN)
 
 
 def theme_symbol():
@@ -1744,7 +1974,7 @@ def build_header(
     tk.Label(
         header,
         text=title,
-        font=sfont(18),
+        font=sfont(16),
         bg=HEADER_BG,
         fg=ON_ACCENT
     ).pack(
@@ -1753,17 +1983,9 @@ def build_header(
         pady=spad(18)
     )
 
-    tk.Label(
-        header,
-        text=full_name,
-        font=sfont(10, "normal"),
-        bg=HEADER_BG,
-        fg=ON_ACCENT
-    ).pack(side="left", padx=spad(12))
-
     make_theme_toggle(header, HEADER_BG).pack(
         side="right",
-        padx=spad(10),
+        padx=spad(12),
         pady=spad(14)
     )
 
@@ -1775,6 +1997,40 @@ def build_header(
             RED
         ).pack(side="right", padx=spad(4), pady=spad(14))
 
+    profile = tk.Frame(
+        header,
+        bg=SURFACE_ALT,
+        highlightbackground=BORDER,
+        highlightthickness=1
+    )
+    profile.pack(side="right", padx=spad(8), pady=spad(12))
+
+    initials = "".join(
+        part[0] for part in full_name.split()[:2] if part
+    ).upper() or "U"
+    tk.Label(
+        profile,
+        text=initials,
+        font=sfont(9),
+        bg=BLUE,
+        fg=ON_ACCENT,
+        padx=spad(8),
+        pady=spad(5)
+    ).pack(side="left", padx=(spad(5), spad(7)), pady=spad(4))
+    tk.Label(
+        profile,
+        text=full_name,
+        font=sfont(9, "bold"),
+        bg=SURFACE_ALT,
+        fg=TEXT
+    ).pack(side="left", padx=(0, spad(10)), pady=spad(7))
+
+    tk.Frame(
+        header,
+        bg=BLUE,
+        height=max(2, spad(2))
+    ).place(x=0, y=HEADER_HEIGHT - max(2, spad(2)), width=WINDOW_WIDTH)
+
 
 # --------------------------------------------------
 # LOGIN TYPE SELECTION
@@ -1785,16 +2041,24 @@ def logout():
 
 
 def show_login_selection():
+    show_login()
+
+
+# --------------------------------------------------
+# LOGIN FORM
+# --------------------------------------------------
+
+def show_login(role=None):
     global CURRENT_SCREEN
-    CURRENT_SCREEN = lambda: show_login_selection()
+    CURRENT_SCREEN = lambda: show_login(role)
     clear_screen()
 
     create_glass_panel(
         background_canvas,
-        280,
-        75,
-        540,
-        575,
+        300,
+        90,
+        500,
+        560,
         radius=32
     )
 
@@ -1824,78 +2088,19 @@ def show_login_selection():
     )
 
     background_canvas.create_line(
-        350,
-        275,
-        750,
-        275,
-        fill=BLUE,
-        width=3
-    )
-
-    background_canvas.create_text(
-        550,
-        315,
-        text="WELCOME",
-        font=sfont(19),
-        fill=TEXT
-    )
-
-    rounded_button(
-        background_canvas,
         390,
-        360,
-        320,
-        55,
-        "LOGIN",
-        BLUE,
-        lambda: show_login("")
+        255,
+        710,
+        255,
+        fill=BLUE,
+        width=2
     )
 
-    rounded_button(
-        background_canvas,
-        450,
-        450,
-        200,
-        45,
-        "EXIT APPLICATION",
-        GRAY,
-        close_application,
-        font=sfont(10)
-    )
+    login_title = f"{role.upper()} LOGIN" if role else "LOGIN"
 
     background_canvas.create_text(
         550,
-        615,
-        text="GRADING  |  SYSTEM  |  PRESS ESC TO EXIT",
-        font=sfont(9, "normal"),
-        fill=MUTED
-    )
-
-    draw_theme_toggle_on_canvas(background_canvas, 898, 28)
-
-# --------------------------------------------------
-# LOGIN FORM
-# --------------------------------------------------
-
-def show_login(role=""):
-    global CURRENT_SCREEN
-    CURRENT_SCREEN = lambda: show_login(role)
-    clear_screen()
-
-    create_glass_panel(
-        background_canvas,
-        300,
-        90,
-        500,
-        520,
-        radius=32
-    )
-
-    login_title = "LOGIN" if not role else (role.upper() + " LOGIN")
-
-    background_canvas.create_text(
-        550,
-        150,
+        290,
         text=login_title,
         font=sfont(28),
         fill=TEXT
@@ -1903,24 +2108,15 @@ def show_login(role=""):
 
     background_canvas.create_text(
         550,
-        195,
+        330,
         text="Enter your account details",
         font=sfont(12, "normal"),
         fill=MUTED
     )
 
-    background_canvas.create_line(
-        390,
-        220,
-        710,
-        220,
-        fill=BLUE,
-        width=2
-    )
-
     background_canvas.create_text(
         390,
-        250,
+        370,
         text="Username",
         font=sfont(11),
         fill=TEXT,
@@ -1942,14 +2138,14 @@ def show_login(role=""):
     place_scaled(
         username_entry,
         390,
-        270,
+        390,
         320,
-        40
+        38
     )
 
     background_canvas.create_text(
         390,
-        335,
+        445,
         text="Password",
         font=sfont(11),
         fill=TEXT,
@@ -1972,9 +2168,9 @@ def show_login(role=""):
     place_scaled(
         password_entry,
         390,
-        355,
+        465,
         270,
-        40
+        38
     )
 
     def toggle_password():
@@ -2001,9 +2197,9 @@ def show_login(role=""):
     place_scaled(
         eye_button,
         665,
-        355,
+        465,
         45,
-        40
+        38
     )
 
     def login():
@@ -2018,16 +2214,22 @@ def show_login(role=""):
             )
             return
 
-        user = authenticate_user(
-            username,
-            password,
-            role
-        )
+        selected_role = role
+        user = None
+
+        if selected_role is None:
+            for candidate_role in ["Admin", "Teacher", "Student"]:
+                user = authenticate_user(username, password, candidate_role)
+                if user is not None:
+                    selected_role = candidate_role
+                    break
+        else:
+            user = authenticate_user(username, password, selected_role)
 
         if user is None:
             messagebox.showerror(
                 "Login Failed",
-                "Invalid username or password.",
+                "Invalid username, password, or account details.",
                 parent=root
             )
 
@@ -2037,14 +2239,13 @@ def show_login(role=""):
 
         account_username = user.get("username", username)
         full_name = user.get("full_name", username)
-        user_role = user.get("role", "Student")
 
-        if user_role == "Admin":
+        if selected_role == "Admin":
             show_admin_dashboard(
                 full_name,
                 account_username
             )
-        elif user_role == "Teacher":
+        elif selected_role == "Teacher":
             show_teacher_dashboard(
                 full_name,
                 account_username
@@ -2058,9 +2259,9 @@ def show_login(role=""):
     rounded_button(
         background_canvas,
         390,
-        425,
+        520,
         320,
-        55,
+        45,
         "LOGIN",
         BLUE,
         login
@@ -2068,19 +2269,19 @@ def show_login(role=""):
 
     rounded_button(
         background_canvas,
-        390,
-        495,
-        320,
-        45,
-        "BACK",
+        450,
+        580,
+        200,
+        35,
+        "EXIT APPLICATION",
         GRAY,
-        show_login_selection,
+        close_application,
         font=sfont(10)
     )
 
     background_canvas.create_text(
         550,
-        570,
+        630,
         text="SMCII SECURE LOGIN",
         font=sfont(10, "normal"),
         fill=MUTED
@@ -2099,6 +2300,9 @@ def show_login(role=""):
     )
 
     username_entry.focus_set()
+
+    start_background_animation()
+
 
 # --------------------------------------------------
 # ADMIN DASHBOARD
@@ -2123,35 +2327,12 @@ def show_admin_dashboard(full_name, admin_username):
         height=WINDOW_HEIGHT - HEADER_HEIGHT
     )
 
-    title_row = tk.Frame(content, bg=PAGE_BG)
-    title_row.pack(
-        fill="x",
-        padx=spad(25),
-        pady=(spad(10), spad(6))
+    make_dashboard_banner(
+        content,
+        "System Overview",
+        f"{full_name}  ·  School year {current_school_year()}",
+        lambda: show_admin_dashboard(full_name, admin_username)
     )
-
-    tk.Label(
-        title_row,
-        text="System Overview",
-        font=sfont(20),
-        bg=PAGE_BG,
-        fg=TEXT
-    ).pack(side="left")
-
-    tk.Label(
-        title_row,
-        text=f"{full_name}  |  ",
-        font=sfont(9, "normal"),
-        bg=PAGE_BG,
-        fg=MUTED
-    ).pack(side="left", padx=spad(14))
-
-    make_button(
-        title_row,
-        "REFRESH",
-        lambda: show_admin_dashboard(full_name, admin_username),
-        GRAY
-    ).pack(side="right")
 
     stats = system_statistics()
 
@@ -2175,14 +2356,7 @@ def show_admin_dashboard(full_name, admin_username):
         ("Teachers", stats["teachers"], GREEN),
         ("Students", stats["students"], PURPLE),
         ("Grade Records", stats["total_grades"], BLUE),
-        (
-            "Average College Grade",
-            (
-                format_college_grade(stats["average_grade"])
-                if stats["total_grades"] else "—"
-            ),
-            GREEN
-        ),
+        ("Class Average", f"{stats['average_grade']:.2f}", GREEN),
         ("Pass Rate", f"{stats['pass_rate']:.2f}%", PURPLE),
         ("Subjects Offered", stats["subjects_offered"], BLUE),
         (
@@ -2207,6 +2381,287 @@ def show_admin_dashboard(full_name, admin_username):
             index % 5,
             color
         )
+
+    semester_panel = tk.LabelFrame(
+        content,
+        text="Semester Management",
+        font=sfont(10),
+        bg=SURFACE,
+        fg=TEXT,
+        padx=spad(12),
+        pady=spad(8)
+    )
+    style_dashboard_panel(semester_panel)
+    semester_panel.pack(
+        fill="x",
+        padx=spad(20),
+        pady=(spad(0), spad(18))
+    )
+
+    tk.Label(
+        semester_panel,
+        text=f"School Year: {data_store.get('settings', {}).get('school_year', current_school_year())}",
+        bg=SURFACE,
+        fg=TEXT,
+        font=sfont(10)
+    ).pack(anchor="w", pady=(0, spad(6)))
+
+    for semester in SEMESTER_NAMES:
+        status = semester_status_for(semester)
+        first_status = semester_status_for("First Semester")
+        row = tk.Frame(semester_panel, bg=SURFACE)
+        row.pack(fill="x", pady=spad(4))
+
+        tk.Label(
+            row,
+            text=f"{semester}: {status}",
+            bg=SURFACE,
+            fg=BLUE if status == "Completed" else TEXT,
+            font=sfont(10)
+        ).pack(side="left")
+
+        if semester == "First Semester":
+            if status == "Not Started":
+                tk.Label(
+                    row,
+                    text="Awaiting semester start",
+                    bg=SURFACE,
+                    fg=MUTED,
+                    font=sfont(8, "normal")
+                ).pack(side="left", padx=spad(12))
+
+                def start_handler(selected_semester=semester):
+                    confirm = messagebox.askyesno(
+                        "Start Semester",
+                        f"Start {selected_semester}? This will allow teachers to begin entering grades.",
+                        parent=root
+                    )
+                    if not confirm:
+                        return
+
+                    success, message = start_semester(
+                        selected_semester,
+                        admin_username,
+                        "Administrator-approved semester start"
+                    )
+                    if success:
+                        messagebox.showinfo(
+                            "Semester Started",
+                            message,
+                            parent=root
+                        )
+                        show_admin_dashboard(full_name, admin_username)
+                    else:
+                        messagebox.showerror(
+                            "Start Failed",
+                            message,
+                            parent=root
+                        )
+
+                make_button(
+                    row,
+                    "START FIRST SEMESTER",
+                    start_handler,
+                    GREEN
+                ).pack(side="right")
+            elif status == "In Progress":
+                checklist = semester_completion_status(semester)
+                missing_count = len(checklist["missing"])
+                tk.Label(
+                    row,
+                    text=f"Missing grades: {missing_count}",
+                    bg=SURFACE,
+                    fg=MUTED,
+                    font=sfont(8, "normal")
+                ).pack(side="left", padx=spad(12))
+
+                def complete_handler(selected_semester=semester):
+                    confirm = messagebox.askyesno(
+                        "Complete Semester",
+                        f"Complete {selected_semester}? This will lock the semester and prevent further teacher edits.",
+                        parent=root
+                    )
+                    if not confirm:
+                        return
+
+                    success, message = complete_semester(
+                        selected_semester,
+                        admin_username,
+                        "Administrator-approved completion"
+                    )
+                    if success:
+                        messagebox.showinfo(
+                            "Semester Completed",
+                            message,
+                            parent=root
+                        )
+                        show_admin_dashboard(full_name, admin_username)
+                    else:
+                        messagebox.showerror(
+                            "Completion Blocked",
+                            message,
+                            parent=root
+                        )
+
+                make_button(
+                    row,
+                    "COMPLETE FIRST SEMESTER",
+                    complete_handler,
+                    GREEN
+                ).pack(side="right")
+            elif status == "Completed":
+                tk.Label(
+                    row,
+                    text="Grade entry is locked for this semester.",
+                    bg=SURFACE,
+                    fg=MUTED,
+                    font=sfont(8, "normal")
+                ).pack(side="left", padx=spad(12))
+            elif status == "Reopened":
+                tk.Label(
+                    row,
+                    text="Grade entry has been reopened by the administrator.",
+                    bg=SURFACE,
+                    fg=RED,
+                    font=sfont(8, "normal")
+                ).pack(side="left", padx=spad(12))
+        else:
+            if first_status == "Not Started":
+                tk.Label(
+                    row,
+                    text="LOCKED — Start First Semester First",
+                    bg=SURFACE,
+                    fg=RED,
+                    font=sfont(8, "normal")
+                ).pack(side="left", padx=spad(12))
+            elif status == "Not Started":
+                def start_handler(selected_semester=semester):
+                    confirm = messagebox.askyesno(
+                        "Start Semester",
+                        f"Start {selected_semester}? This will allow teachers to begin entering grades.",
+                        parent=root
+                    )
+                    if not confirm:
+                        return
+
+                    success, message = start_semester(
+                        selected_semester,
+                        admin_username,
+                        "Administrator-approved semester start"
+                    )
+                    if success:
+                        messagebox.showinfo(
+                            "Semester Started",
+                            message,
+                            parent=root
+                        )
+                        show_admin_dashboard(full_name, admin_username)
+                    else:
+                        messagebox.showerror(
+                            "Start Failed",
+                            message,
+                            parent=root
+                        )
+
+                make_button(
+                    row,
+                    "START SECOND SEMESTER",
+                    start_handler,
+                    GREEN
+                ).pack(side="right")
+            elif status == "In Progress":
+                def complete_handler(selected_semester=semester):
+                    confirm = messagebox.askyesno(
+                        "Complete Semester",
+                        f"Complete {selected_semester}? This will lock the semester and prevent further teacher edits.",
+                        parent=root
+                    )
+                    if not confirm:
+                        return
+
+                    success, message = complete_semester(
+                        selected_semester,
+                        admin_username,
+                        "Administrator-approved completion"
+                    )
+                    if success:
+                        messagebox.showinfo(
+                            "Semester Completed",
+                            message,
+                            parent=root
+                        )
+                        show_admin_dashboard(full_name, admin_username)
+                    else:
+                        messagebox.showerror(
+                            "Completion Blocked",
+                            message,
+                            parent=root
+                        )
+
+                make_button(
+                    row,
+                    "COMPLETE SECOND SEMESTER",
+                    complete_handler,
+                    GREEN
+                ).pack(side="right")
+            elif status == "Completed":
+                tk.Label(
+                    row,
+                    text="Grade entry is locked for this semester.",
+                    bg=SURFACE,
+                    fg=MUTED,
+                    font=sfont(8, "normal")
+                ).pack(side="left", padx=spad(12))
+            elif status == "Reopened":
+                tk.Label(
+                    row,
+                    text="Grade entry has been reopened by the administrator.",
+                    bg=SURFACE,
+                    fg=RED,
+                    font=sfont(8, "normal")
+                ).pack(side="left", padx=spad(12))
+
+        if status == "Completed":
+            def reopen_handler(selected_semester=semester):
+                reason = simpledialog.askstring(
+                    "Reopen Semester",
+                    f"Enter the reason for reopening {selected_semester}:",
+                    parent=root
+                )
+                if not reason or not reason.strip():
+                    if reason is not None:
+                        messagebox.showwarning(
+                            "Reason Required",
+                            "A reopening reason is required before the semester can be reopened.",
+                            parent=root
+                        )
+                    return
+
+                success, message = reopen_semester(
+                    selected_semester,
+                    admin_username,
+                    reason.strip()
+                )
+                if success:
+                    messagebox.showinfo(
+                        "Semester Reopened",
+                        message,
+                        parent=root
+                    )
+                    show_admin_dashboard(full_name, admin_username)
+                else:
+                    messagebox.showerror(
+                        "Reopen Failed",
+                        message,
+                        parent=root
+                    )
+
+            make_button(
+                row,
+                f"REOPEN {semester.upper()}",
+                reopen_handler,
+                RED
+            ).pack(side="right")
 
 
 def show_user_management(full_name, admin_username):
@@ -2283,6 +2738,7 @@ def show_user_management(full_name, admin_username):
             text="Create Account - Choose Account Type",
             font=sfont(10),
             bg=SURFACE,
+            fg=TEXT,
             padx=spad(16),
             pady=spad(12)
         )
@@ -2320,6 +2776,7 @@ def show_user_management(full_name, admin_username):
             text=f"Create Account - {role}",
             font=sfont(10),
             bg=SURFACE,
+            fg=TEXT,
             padx=spad(12),
             pady=spad(8)
         )
@@ -2327,6 +2784,8 @@ def show_user_management(full_name, admin_username):
         create_form_frame["frame"] = form
 
         entries = {}
+        role_choice = {"role": role}
+
         field_layout = [
             ("Username", 0, 0),
             ("Password", 0, 2),
@@ -2337,7 +2796,8 @@ def show_user_management(full_name, admin_username):
             tk.Label(
                 form,
                 text=name + ":",
-                bg=SURFACE
+                bg=SURFACE,
+                fg=TEXT
             ).grid(
                 row=row,
                 column=col,
@@ -2361,7 +2821,8 @@ def show_user_management(full_name, admin_username):
             tk.Label(
                 form,
                 text="ID Number:",
-                bg=SURFACE
+                bg=SURFACE,
+                fg=TEXT
             ).grid(
                 row=2,
                 column=0,
@@ -2372,7 +2833,7 @@ def show_user_management(full_name, admin_username):
 
             tk.Label(
                 form,
-                text="Assigned automatically (C25-0101, C25-0102, ...)",
+                text="Assigned automatically (C26-0001 format)",
                 bg=SURFACE,
                 fg=MUTED,
                 font=sfont(9, "normal")
@@ -2384,12 +2845,14 @@ def show_user_management(full_name, admin_username):
                 sticky="w"
             )
 
+            id_entry = None
             subject_list = None
         else:
             tk.Label(
                 form,
                 text="Subjects:",
-                bg=SURFACE
+                bg=SURFACE,
+                fg=TEXT
             ).grid(
                 row=2,
                 column=0,
@@ -2425,34 +2888,15 @@ def show_user_management(full_name, admin_username):
                 sticky="w"
             )
 
-            tk.Label(
-                form,
-                text="ID: T25-0201, T25-0202, ... (auto)",
-                bg=SURFACE,
-                fg=MUTED,
-                font=sfont(8, "normal")
-            ).grid(
-                row=2,
-                column=2,
-                columnspan=2,
-                padx=spad(8),
-                pady=spad(6),
-                sticky="w"
-            )
+            id_entry = None
 
         role_hint = tk.Label(
             form,
             text=(
-                (
-                    "Student ID numbers are generated automatically. "
-                    "Students are also randomly assigned to "
-                    f"{' or '.join(STUDENT_BLOCKS)}."
-                )
+                "Student ID is assigned automatically (C26-0001 format)."
                 if role == "Student"
-                else (
-                    "Teacher ID numbers are generated automatically. "
-                    "Hold Ctrl to select several subjects."
-                )
+                else "Teacher ID is assigned automatically (T26-0001 format). "
+                     "Hold Ctrl to select several subjects."
             ),
             bg=SURFACE,
             fg=MUTED,
@@ -2510,6 +2954,9 @@ def show_user_management(full_name, admin_username):
                 for entry in entries.values():
                     entry.delete(0, tk.END)
 
+                if id_entry is not None:
+                    id_entry.delete(0, tk.END)
+
                 if subject_list is not None:
                     subject_list.selection_clear(0, tk.END)
 
@@ -2540,6 +2987,7 @@ def show_user_management(full_name, admin_username):
         text="Registered Accounts",
         font=sfont(10),
         bg=SURFACE,
+        fg=TEXT,
         padx=spad(8),
         pady=spad(8)
     )
@@ -2575,7 +3023,7 @@ def show_user_management(full_name, admin_username):
     tk.Label(
         search_row,
         text=(
-            "Search by name, username, ID number, role or student block."
+            "Type a name, username, ID number or role to filter the list."
         ),
         bg=SURFACE,
         fg=MUTED,
@@ -2583,11 +3031,11 @@ def show_user_management(full_name, admin_username):
     ).pack(side="left", padx=spad(6))
 
     columns = (
+        "_id",
         "ID Number",
         "Username",
         "Full Name",
         "Role",
-        "Block",
         "Status"
     )
 
@@ -2596,10 +3044,19 @@ def show_user_management(full_name, admin_username):
         columns=columns,
         show="headings"
     )
+    table["displaycolumns"] = (
+        "ID Number",
+        "Username",
+        "Full Name",
+        "Role",
+        "Status"
+    )
+
+    table.column("_id", width=0, stretch=False)
 
     for column, width in zip(
-        columns,
-        (125, 170, 300, 100, 90, 100)
+        columns[1:],
+        (140, 190, 330, 120, 110)
     ):
         table.heading(column, text=column)
         table.column(column, width=sx(width), anchor="w")
@@ -2615,13 +3072,15 @@ def show_user_management(full_name, admin_username):
             data_store["users"],
             key=lambda item: item.get("id", 0)
         ):
+            if user.get("role", "").lower() == "admin":
+                continue
+
             if needle:
                 haystack = " ".join([
                     str(user.get("username", "")),
                     str(user.get("full_name", "")),
                     str(user.get("role", "")),
-                    str(user.get("student_id", "")),
-                    str(user.get("block", ""))
+                    account_id_of(user.get("username", ""))
                 ]).lower()
 
                 if needle not in haystack:
@@ -2630,17 +3089,12 @@ def show_user_management(full_name, admin_username):
             table.insert(
                 "",
                 "end",
-                iid=str(user.get("id", "")),
                 values=(
-                    user.get("student_id", "") or "—",
+                    user.get("id", ""),
+                    account_id_of(user.get("username", "")) or "—",
                     user.get("username", ""),
                     user.get("full_name", ""),
                     user.get("role", ""),
-                    (
-                        user.get("block", "") or "Unassigned"
-                        if user.get("role", "").lower() == "student"
-                        else "—"
-                    ),
                     "Active" if user.get("active", True) else "Inactive"
                 )
             )
@@ -2661,7 +3115,8 @@ def show_user_management(full_name, admin_username):
             )
             return None
 
-        selected_id = str(selection[0]).strip()
+        values = table.item(selection[0], "values")
+        selected_id = str(values[0]).strip()
 
         user = next(
             (
@@ -2682,6 +3137,44 @@ def show_user_management(full_name, admin_username):
             )
 
         return user
+
+    def create_account():
+        selected_subjects = [
+            subject_list.get(index)
+            for index in subject_list.curselection()
+        ]
+
+        role = role_choice["role"]
+
+        success, message = add_user(
+            entries["Username"].get(),
+            entries["Password"].get(),
+            entries["Full Name"].get(),
+            role,
+            admin_username,
+            subjects=selected_subjects
+        )
+
+        if success:
+            messagebox.showinfo(
+                "Success",
+                message,
+                parent=root
+            )
+
+            for entry in entries.values():
+                entry.delete(0, tk.END)
+
+            subject_list.selection_clear(0, tk.END)
+
+            refresh_users()
+
+        else:
+            messagebox.showerror(
+                "Account Error",
+                message,
+                parent=root
+            )
 
     def handle_edit_account():
         user = selected_user()
@@ -2704,7 +3197,7 @@ def show_user_management(full_name, admin_username):
             ("role", "Role", role_options, "combo"),
             (
                 "student_id",
-                "ID Number",
+                "ID Number (student only)",
                 user.get("student_id", ""),
                 "text"
             ),
@@ -2918,16 +3411,12 @@ def show_user_management(full_name, admin_username):
 def show_accounts(
     admin_full_name,
     admin_username,
-    account_type="Teacher",
-    block_filter="All Blocks"
+    account_type="Teacher"
 ):
     global CURRENT_SCREEN
-    CURRENT_SCREEN = lambda: show_accounts(
-        admin_full_name,
-        admin_username,
-        account_type,
-        block_filter
-    )
+    CURRENT_SCREEN = lambda: show_accounts(admin_full_name,
+    admin_username,
+    account_type="Teacher")
     clear_screen()
     build_header(
         "ADMIN ACCOUNTS",
@@ -2981,24 +3470,6 @@ def show_accounts(
         BLUE if account_type == "Student" else GRAY
     ).pack(side="left", padx=spad(4))
 
-    if account_type == "Student":
-        for label, value in (
-            ("ALL BLOCKS", "All Blocks"),
-            ("BLOCK A", "Block A"),
-            ("BLOCK B", "Block B")
-        ):
-            make_button(
-                top,
-                label,
-                lambda selected_block=value: show_accounts(
-                    admin_full_name,
-                    admin_username,
-                    "Student",
-                    selected_block
-                ),
-                BLUE if block_filter == value else GRAY
-            ).pack(side="left", padx=spad(3))
-
     make_button(
         top,
         "BACK TO OVERVIEW",
@@ -3019,12 +3490,9 @@ def show_accounts(
 
     left = tk.LabelFrame(
         body,
-        text=(
-            f"Student Accounts - {block_filter}"
-            if account_type == "Student"
-            else "Teacher Accounts"
-        ),
+        text=f"{account_type} Accounts",
         bg=SURFACE,
+        fg=TEXT,
         font=sfont(10),
         padx=spad(6),
         pady=spad(6)
@@ -3038,25 +3506,13 @@ def show_accounts(
         520
     )
 
-    if account_type == "Student":
-        account_columns = (
-            "ID Number",
-            "Username",
-            "Full Name",
-            "Block",
-            "Status"
-        )
-
-        account_widths = (78, 78, 110, 70, 58)
-    else:
-        account_columns = (
-            "ID Number",
-            "Username",
-            "Full Name",
-            "Status"
-        )
-
-        account_widths = (78, 110, 155, 70)
+    account_columns = (
+        "ID Number",
+        "Username",
+        "Full Name",
+        "Status"
+    )
+    account_widths = (110, 100, 145, 70)
 
     account_table = ttk.Treeview(
         left,
@@ -3100,9 +3556,9 @@ def show_accounts(
     tk.Label(
         search_frame,
         text=(
-            "Name, username, ID number or block"
+            "Name, username or ID number"
             if account_type == "Student"
-            else "Name, username or ID number"
+            else "Name or username"
         ),
         bg=SURFACE,
         fg=MUTED,
@@ -3115,6 +3571,7 @@ def show_accounts(
         body,
         text="Account Details",
         bg=SURFACE,
+        fg=TEXT,
         font=sfont(10),
         padx=spad(10),
         pady=spad(8)
@@ -3223,10 +3680,7 @@ def show_accounts(
                 ("Activities", grade.get("activities", "—")),
                 ("Midterm", grade.get("midterm", "—")),
                 ("Final Exam", grade.get("final_exam", "—")),
-                (
-                    "Final College Grade",
-                    format_college_grade(grade.get("final_grade"))
-                ),
+                ("Final Grade", grade.get("final_grade", "—")),
             ]
 
             for item, value in legacy_items:
@@ -3292,7 +3746,7 @@ def show_accounts(
             value = "—"
 
             if isinstance(block, dict):
-                value = format_college_grade(block.get("term_grade"))
+                value = format_assessment(block.get("term_grade"))
 
             term_values.append(value)
 
@@ -3308,7 +3762,7 @@ def show_accounts(
             overall = overall_grade_for_terms(terms)
 
         if isinstance(overall, (int, float)):
-            overall_text = format_college_grade(overall)
+            overall_text = format_overall_grade_display(overall)
         else:
             overall_text = "—"
 
@@ -3352,37 +3806,22 @@ def show_accounts(
         info = tk.Frame(right, bg=SURFACE)
         info.pack(fill="x", anchor="n")
 
-        detail_line(info, "Account ID", user.get("id"), 0)
-        detail_line(info, "Full Name", user.get("full_name"), 1)
-        detail_line(info, "Username", user.get("username"), 2)
-        detail_line(info, "Role", user.get("role"), 3)
+        detail_line(info, "Full Name", user.get("full_name"), 0)
+        detail_line(info, "Username", user.get("username"), 1)
+        detail_line(info, "Role", user.get("role"), 2)
 
-        if user.get("role", "").lower() == "student":
-            detail_line(
-                info,
-                "ID Number",
-                user.get("student_id", ""),
-                4
-            )
-            detail_line(
-                info,
-                "Block",
-                user.get("block", "") or "Unassigned",
-                5
-            )
-        elif user.get("role", "").lower() == "teacher":
-            detail_line(
-                info,
-                "ID Number",
-                user.get("student_id", ""),
-                4
-            )
+        detail_line(
+            info,
+            "ID Number",
+            account_id_of(username) or "—",
+            3
+        )
 
         detail_line(
             info,
             "Status",
             "Active" if user.get("active", True) else "Inactive",
-            6 if user.get("role", "").lower() == "student" else 5
+            4
         )
 
         if account_type == "Teacher":
@@ -3462,7 +3901,7 @@ def show_accounts(
                     overall = record.get("final_grade", "—")
 
                     if isinstance(overall, (int, float)):
-                        overall = format_college_grade(overall)
+                        overall = format_overall_grade_display(overall)
 
                     recent_table.insert(
                         "",
@@ -3573,8 +4012,7 @@ def show_accounts(
                 text=(
                     f"Accounts: {stats['total_users']}  |  "
                     f"Grade records: {stats['total_grades']}  |  "
-                    f"Average college grade: "
-                    f"{format_college_grade(stats['average_grade']) if stats['total_grades'] else '—'}  |  "
+                    f"Class average: {stats['average_grade']:.2f}  |  "
                     f"Pass rate: {stats['pass_rate']:.2f}%"
                 ),
                 bg=SURFACE,
@@ -3599,39 +4037,22 @@ def show_accounts(
         )
 
         for user in accounts:
-            if (
-                account_type == "Student"
-                and block_filter != "All Blocks"
-                and user.get("block", "") != block_filter
-            ):
-                continue
-
             if needle:
                 haystack = " ".join([
                     str(user.get("username", "")),
                     str(user.get("full_name", "")),
-                    str(user.get("student_id", "")),
-                    str(user.get("block", ""))
+                    account_id_of(user.get("username", ""))
                 ]).lower()
 
                 if needle not in haystack:
                     continue
 
-            if account_type == "Student":
-                values = (
-                    user.get("student_id", "") or "—",
-                    user.get("username", ""),
-                    user.get("full_name", ""),
-                    user.get("block", "") or "Unassigned",
-                    "Active" if user.get("active", True) else "Inactive"
-                )
-            else:
-                values = (
-                    user.get("student_id", "") or "—",
-                    user.get("username", ""),
-                    user.get("full_name", ""),
-                    "Active" if user.get("active", True) else "Inactive"
-                )
+            values = (
+                account_id_of(user.get("username", "")) or "—",
+                user.get("username", ""),
+                user.get("full_name", ""),
+                "Active" if user.get("active", True) else "Inactive"
+            )
 
             account_table.insert(
                 "",
@@ -3724,6 +4145,7 @@ def show_all_grades(full_name, admin_username):
         text="Filters",
         font=sfont(10),
         bg=SURFACE,
+        fg=TEXT,
         padx=spad(8),
         pady=spad(6)
     )
@@ -3734,6 +4156,7 @@ def show_all_grades(full_name, admin_username):
         filters,
         text="Student (username or ID No.):",
         bg=SURFACE,
+        fg=TEXT,
         font=sfont(9)
     ).pack(side="left", padx=(spad(4), spad(4)))
 
@@ -3744,6 +4167,7 @@ def show_all_grades(full_name, admin_username):
         filters,
         text="Subject:",
         bg=SURFACE,
+        fg=TEXT,
         font=sfont(9)
     ).pack(side="left", padx=(spad(0), spad(4)))
 
@@ -3764,6 +4188,7 @@ def show_all_grades(full_name, admin_username):
         filters,
         text="Teacher:",
         bg=SURFACE,
+        fg=TEXT,
         font=sfont(9)
     ).pack(side="left", padx=(spad(0), spad(4)))
 
@@ -3812,6 +4237,7 @@ def show_all_grades(full_name, admin_username):
         text="Grade Records",
         font=sfont(10),
         bg=SURFACE,
+        fg=TEXT,
         padx=spad(6),
         pady=spad(6)
     )
@@ -3857,6 +4283,7 @@ def show_all_grades(full_name, admin_username):
         text="Assessment Breakdown",
         font=sfont(10),
         bg=SURFACE,
+        fg=TEXT,
         padx=spad(8),
         pady=spad(6)
     )
@@ -3887,14 +4314,14 @@ def show_all_grades(full_name, admin_username):
                 value = terms.get(term, {}).get("term_grade")
 
                 if isinstance(value, (int, float)):
-                    term_values.append(format_college_grade(value))
+                    term_values.append(f"{value:.2f}")
                 else:
                     term_values.append("Legacy")
 
             overall = record.get("final_grade")
 
             if isinstance(overall, (int, float)):
-                overall_text = format_college_grade(overall)
+                overall_text = format_grade_point(overall)
 
                 status = (
                     "PASSED"
@@ -3962,7 +4389,7 @@ def show_all_grades(full_name, admin_username):
         overall = record.get("final_grade")
 
         if isinstance(overall, (int, float)):
-            overall_text = format_college_grade(overall)
+            overall_text = format_grade_point(overall)
 
             status = (
                 "PASSED"
@@ -4041,7 +4468,7 @@ def show_all_grades(full_name, admin_username):
             value = "—"
 
             if isinstance(block, dict):
-                value = format_college_grade(block.get("term_grade"))
+                value = format_assessment(block.get("term_grade"))
 
             term_values.append(value)
 
@@ -4105,6 +4532,7 @@ def show_subjects(full_name, admin_username):
         text="Add Subject",
         font=sfont(10),
         bg=SURFACE,
+        fg=TEXT,
         padx=spad(8),
         pady=spad(6)
     )
@@ -4115,6 +4543,7 @@ def show_subjects(full_name, admin_username):
         form,
         text="Subject Name:",
         bg=SURFACE,
+        fg=TEXT,
         font=sfont(10)
     ).pack(side="left", padx=(spad(4), spad(6)))
 
@@ -4167,6 +4596,7 @@ def show_subjects(full_name, admin_username):
         text="Subjects Offered",
         font=sfont(10),
         bg=SURFACE,
+        fg=TEXT,
         padx=spad(8),
         pady=spad(8)
     )
@@ -4329,6 +4759,7 @@ def show_announcements(full_name, admin_username):
         text="Post Announcement",
         font=sfont(10),
         bg=SURFACE,
+        fg=TEXT,
         padx=spad(8),
         pady=spad(6)
     )
@@ -4342,6 +4773,7 @@ def show_announcements(full_name, admin_username):
         meta_row,
         text="Title:",
         bg=SURFACE,
+        fg=TEXT,
         font=sfont(10)
     ).pack(side="left", padx=(spad(4), spad(6)))
 
@@ -4352,6 +4784,7 @@ def show_announcements(full_name, admin_username):
         meta_row,
         text="Audience:",
         bg=SURFACE,
+        fg=TEXT,
         font=sfont(10)
     ).pack(side="left", padx=(spad(18), spad(6)))
 
@@ -4440,6 +4873,7 @@ def show_announcements(full_name, admin_username):
         text="Posted Announcements",
         font=sfont(10),
         bg=SURFACE,
+        fg=TEXT,
         padx=spad(8),
         pady=spad(8)
     )
@@ -4652,6 +5086,7 @@ def show_teacher_assignments(full_name, admin_username):
         form,
         text="Teacher:",
         bg=SURFACE,
+        fg=TEXT,
         font=sfont(10)
     ).pack(side="left", padx=(spad(4), spad(6)))
 
@@ -4671,6 +5106,7 @@ def show_teacher_assignments(full_name, admin_username):
         form,
         text="Subject:",
         bg=SURFACE,
+        fg=TEXT,
         font=sfont(10)
     ).pack(side="left", padx=(spad(18), spad(6)))
 
@@ -4969,6 +5405,7 @@ def show_activity_log(full_name, admin_username):
         text="Recorded Administrative Actions",
         font=sfont(10),
         bg=SURFACE,
+        fg=TEXT,
         padx=spad(8),
         pady=spad(8)
     )
@@ -5132,6 +5569,7 @@ def show_exports(full_name, admin_username):
         text="Available Reports",
         font=sfont(10),
         bg=SURFACE,
+        fg=TEXT,
         padx=spad(12),
         pady=spad(12)
     )
@@ -5315,42 +5753,13 @@ def show_teacher_dashboard(full_name, teacher_username):
 
     class_report = teacher_subject_report(teacher_username)
 
-    title_row = tk.Frame(content, bg=PAGE_BG)
-    title_row.pack(
-        fill="x",
-        padx=spad(20),
-        pady=(spad(8), spad(4))
+    make_dashboard_banner(
+        content,
+        "Grade Management",
+        "Assigned subjects: "
+        + (", ".join(assigned_subjects) if assigned_subjects else "none assigned yet"),
+        lambda: show_teacher_dashboard(full_name, teacher_username)
     )
-
-    tk.Label(
-        title_row,
-        text="Grade Management",
-        font=sfont(19),
-        bg=PAGE_BG,
-        fg=TEXT
-    ).pack(side="left")
-
-    tk.Label(
-        title_row,
-        text=(
-            "Assigned subjects: "
-            + (
-                ", ".join(assigned_subjects)
-                if assigned_subjects
-                else "none assigned yet"
-            )
-        ),
-        font=sfont(9, "normal"),
-        bg=PAGE_BG,
-        fg=MUTED
-    ).pack(side="left", padx=spad(12))
-
-    make_button(
-        title_row,
-        "REFRESH",
-        lambda: show_teacher_dashboard(full_name, teacher_username),
-        GRAY
-    ).pack(side="right")
 
     cards = tk.Frame(content, bg=PAGE_BG)
     cards.pack(fill="x", padx=spad(20), pady=(spad(0), spad(6)))
@@ -5369,8 +5778,8 @@ def show_teacher_dashboard(full_name, teacher_username):
         ("Grade Records", len(teacher_records), PURPLE),
         ("Students Graded", len(graded_students), GREEN),
         (
-            "Class GPA",
-            format_college_grade(class_average),
+            "Class Average",
+            f"{class_average:.2f}" if class_average is not None else "—",
             RED
         )
     ]
@@ -5394,6 +5803,7 @@ def show_teacher_dashboard(full_name, teacher_username):
         padx=spad(10),
         pady=spad(6)
     )
+    style_dashboard_panel(notices_frame)
 
     notices_frame.pack(
         fill="x",
@@ -5406,12 +5816,16 @@ def show_teacher_dashboard(full_name, teacher_username):
     build_teacher_records(content, teacher_username)
 
 
-def show_teacher_assessments(full_name, teacher_username):
+def show_teacher_assessments(full_name, teacher_username, selected_semester=None):
     global CURRENT_SCREEN
     CURRENT_SCREEN = lambda: show_teacher_assessments(
         full_name,
-        teacher_username
+        teacher_username,
+        selected_semester
     )
+
+    school_year = data_store.get("settings", {}).get("school_year", current_school_year())
+    selected_semester = selected_semester or data_store.get("settings", {}).get("current_semester", SEMESTER_NAMES[0])
 
     content = teacher_screen(
         "ASSESSMENT SCORES",
@@ -5487,6 +5901,7 @@ def show_teacher_assessments(full_name, teacher_username):
         selector_row,
         text="Student (username or ID No.):",
         bg=SURFACE,
+        fg=TEXT,
         font=sfont(9)
     ).pack(side="left", padx=(spad(2), spad(4)))
 
@@ -5503,6 +5918,7 @@ def show_teacher_assessments(full_name, teacher_username):
         selector_row,
         text="Subject:",
         bg=SURFACE,
+        fg=TEXT,
         font=sfont(9)
     ).pack(side="left", padx=(0, spad(4)))
 
@@ -5517,8 +5933,34 @@ def show_teacher_assessments(full_name, teacher_username):
 
     tk.Label(
         selector_row,
+        text="Semester:",
+        bg=SURFACE,
+        fg=TEXT,
+        font=sfont(9)
+    ).pack(side="left", padx=(0, spad(4)))
+
+    semester_box = ttk.Combobox(
+        selector_row,
+        values=SEMESTER_NAMES,
+        state="readonly",
+        width=20
+    )
+    semester_box.set(selected_semester)
+    semester_box.pack(side="left", padx=(0, spad(10)))
+    semester_box.bind(
+        "<<ComboboxSelected>>",
+        lambda event: show_teacher_assessments(
+            full_name,
+            teacher_username,
+            semester_box.get()
+        )
+    )
+
+    tk.Label(
+        selector_row,
         text="Term:",
         bg=SURFACE,
+        fg=TEXT,
         font=sfont(9)
     ).pack(side="left", padx=(0, spad(4)))
 
@@ -5585,20 +6027,16 @@ def show_teacher_assessments(full_name, teacher_username):
             fg=GREEN
         )
 
+    semester_open, semester_message = semester_open_for_entry(selected_semester, school_year)
     tk.Label(
         entry_panel,
         text=(
-            "The administrator has not assigned you a subject yet. "
-            "Ask the administrator to assign your subject before "
-            "entering grades."
-            if not assigned_subjects else
-            "Pick a term, enter every score of that term and calculate it. "
-            "Activities and quizzes are combined as written works (30%), "
-            "the exam is 30% and the performance task is 40% of the term "
-            "grade. The saved terms build the overall grade."
+            f"Semester status: {semester_status_for(selected_semester, school_year)}  |  School year: {school_year}"
+            if assigned_subjects else
+            "The administrator has not assigned you a subject yet. Ask the administrator to assign your subject before entering grades."
         ),
         bg=SURFACE,
-        fg=MUTED if assigned_subjects else RED,
+        fg=GREEN if semester_open else RED,
         font=sfont(8, "normal"),
         wraplength=sx(540),
         justify="left"
@@ -5607,72 +6045,502 @@ def show_teacher_assessments(full_name, teacher_username):
         pady=(spad(6), spad(2))
     )
 
+    tk.Label(
+        entry_panel,
+        text=(
+            "Pick a term, enter every score of that term and calculate it. Activities and quizzes are combined as written works (30%), the exam is 30% and the performance task is 40% of the term grade. The saved terms build the overall grade."
+            if assigned_subjects else
+            ""
+        ),
+        bg=SURFACE,
+        fg=MUTED if assigned_subjects else RED,
+        font=sfont(8, "normal"),
+        wraplength=sx(540),
+        justify="left"
+    ).pack(
+        anchor="w",
+        pady=(spad(2), spad(2))
+    )
+
+    if not semester_open:
+        tk.Label(
+            entry_panel,
+            text=semester_message,
+            bg=SURFACE,
+            fg=RED,
+            font=sfont(9, "bold"),
+            wraplength=sx(540),
+            justify="left"
+        ).pack(anchor="w", pady=(spad(2), spad(4)))
+
     score_frame = tk.Frame(entry_panel, bg=SURFACE)
     score_frame.pack(fill="x", pady=(spad(4), spad(2)))
 
-    tk.Label(
-        score_frame,
-        text="Assessment",
-        bg=SURFACE,
-        font=sfont(9),
-        width=22,
-        anchor="w"
-    ).grid(row=0, column=0, sticky="w", padx=spad(4))
+    table_columns = [
+        ("No.", 56),
+        ("Type", 120),
+        ("Assessment / Item", 200),
+        ("Points Earned", 112),
+        ("Points Possible", 112),
+        ("Score %", 110),
+        ("", 92),
+    ]
 
-    tk.Label(
-        score_frame,
-        text="Score (0-100)",
-        bg=SURFACE,
-        font=sfont(9),
-        width=14
-    ).grid(row=0, column=1, padx=spad(4))
+    header_row = tk.Frame(score_frame, bg=SURFACE)
+    header_row.pack(fill="x", pady=(0, spad(4)))
 
-    score_entries = {}
+    header_label_fg = ON_ACCENT if THEME == "dark" else TEXT
 
-    for row, (key, index, label) in enumerate(ASSESSMENT_ITEMS, start=1):
-        tk.Label(
-            score_frame,
-            text=label,
+    for col_index, (text, width) in enumerate(table_columns):
+        label = tk.Label(
+            header_row,
+            text=text,
             bg=SURFACE,
-            width=22,
-            anchor="w"
-        ).grid(
-            row=row,
-            column=0,
-            sticky="w",
-            padx=spad(4),
-            pady=spad(2)
+            fg=header_label_fg,
+            font=sfont(8, "bold"),
+            anchor="center",
+            justify="center",
+            width=max(8, width // 8)
         )
+        label.grid(row=0, column=col_index, sticky="ew", padx=0, pady=0)
+        header_row.grid_columnconfigure(col_index, minsize=width, weight=0)
+        header_row.columnconfigure(col_index, weight=0)
 
-        entry = make_entry(score_frame, width=12)
+    table_canvas = tk.Canvas(
+        score_frame,
+        bg=SURFACE,
+        highlightthickness=0,
+        height=spad(28)
+    )
+    table_scrollbar = ttk.Scrollbar(
+        score_frame,
+        orient="vertical",
+        command=table_canvas.yview
+    )
+    table_canvas.configure(yscrollcommand=table_scrollbar.set)
+    table_scrollbar.pack_forget()
+    table_canvas.pack(side="left", fill="x", expand=True)
 
-        entry.grid(
-            row=row,
-            column=1,
-            padx=spad(4),
-            pady=spad(2),
-            ipady=spad(2)
+    rows_container = tk.Frame(table_canvas, bg=SURFACE)
+    rows_container_id = table_canvas.create_window((0, 0), window=rows_container, anchor="nw")
+
+    for col_index, (_, width) in enumerate(table_columns):
+        rows_container.grid_columnconfigure(col_index, minsize=width, weight=1)
+
+    def sync_table_width():
+        header_width = max(header_row.winfo_reqwidth(), 1)
+        rows_width = max(rows_container.winfo_reqwidth(), 1)
+        target_width = max(header_width, rows_width)
+        rows_container.configure(width=target_width)
+        table_canvas.itemconfig(rows_container_id, width=target_width)
+
+    def apply_table_scrollregion():
+        rows_container.update_idletasks()
+        table_canvas.update_idletasks()
+        canvas_width = max(rows_container.winfo_reqwidth(), rows_container.winfo_width(), header_row.winfo_reqwidth(), table_canvas.winfo_width(), 1)
+        rows_height = max(rows_container.winfo_reqheight(), rows_container.winfo_height(), 1)
+        table_canvas.configure(scrollregion=(0, 0, canvas_width, rows_height + 8))
+        table_canvas.itemconfig(rows_container_id, width=canvas_width)
+
+    def update_assessment_table_view():
+        row_count = len(assessment_rows)
+        visible_rows = 5
+        if assessment_rows:
+            row_height = max(32, max(row_meta["frame"].winfo_reqheight() for row_meta in assessment_rows))
+        else:
+            row_height = 32
+
+        header_height = max(header_row.winfo_reqheight(), 20)
+        padding = spad(12)
+
+        if row_count <= visible_rows:
+            target_height = header_height + (row_height * row_count) + padding
+            table_canvas.configure(height=target_height)
+            table_scrollbar.pack_forget()
+            table_canvas.configure(yscrollcommand=None)
+        else:
+            target_height = header_height + (row_height * visible_rows) + padding
+            table_canvas.configure(height=target_height)
+            table_scrollbar.pack(side="right", fill="y")
+            table_canvas.configure(yscrollcommand=table_scrollbar.set)
+
+        rows_container.update_idletasks()
+        sync_table_width()
+        apply_table_scrollregion()
+
+        if row_count <= visible_rows:
+            table_canvas.yview_moveto(0)
+
+    def on_canvas_mousewheel(event):
+        if table_scrollbar.winfo_ismapped():
+            table_canvas.yview_scroll(int(event.delta / 120), "units")
+
+    table_canvas.bind("<MouseWheel>", on_canvas_mousewheel)
+    table_canvas.bind("<Button-4>", lambda event: table_canvas.yview_scroll(-1, "units"))
+    table_canvas.bind("<Button-5>", lambda event: table_canvas.yview_scroll(1, "units"))
+
+    def on_table_configure(event):
+        sync_table_width()
+        table_canvas.itemconfig(rows_container_id, width=max(event.width, 1))
+
+    table_canvas.bind("<Configure>", on_table_configure)
+
+    assessment_rows = []
+
+    globals()["table_canvas"] = table_canvas
+    globals()["table_scrollbar"] = table_scrollbar
+    globals()["rows_container"] = rows_container
+    globals()["assessment_rows"] = assessment_rows
+
+    def parse_row_record(row_meta):
+        name = row_meta["name"].get().strip()
+        if not name:
+            return None
+
+        category = row_meta["type"].get().strip() or "Activity"
+        raw_earned = row_meta["earned"].get().strip()
+        raw_possible = row_meta["possible"].get().strip()
+
+        try:
+            earned = float(raw_earned)
+        except (TypeError, ValueError):
+            return None
+
+        try:
+            possible = float(raw_possible)
+        except (TypeError, ValueError):
+            return None
+
+        if earned < 0 or possible <= 0 or earned > possible:
+            return None
+
+        return {
+            "category": category,
+            "assessment_name": name,
+            "points_earned": earned,
+            "possible_points": possible,
+            "percentage": calculate_assessment_percentage(earned, possible),
+        }
+
+    def refresh_row_percent(row_meta):
+        payload = parse_row_record(row_meta)
+        if payload is None:
+            row_meta["percent"].configure(text="—")
+            row_meta["percent"].configure(fg=MUTED)
+            return
+
+        row_meta["percent"].configure(
+            text=f"{payload['percentage']:.2f}%"
         )
+        row_meta["percent"].configure(fg=TEXT)
 
-        entry.bind(
-            "<KeyRelease>",
-            lambda event: update_preview()
+    def sync_row_numbers():
+        for index, row_meta in enumerate(assessment_rows, start=1):
+            row_meta["number"].configure(text=str(index))
+
+    def delete_row(row_meta):
+        record_id = row_meta.get("record_id")
+        if record_id is not None:
+            success, message = delete_assessment_score(record_id, actor=teacher_username)
+            if not success:
+                messagebox.showerror("Delete Failed", message, parent=root)
+                return
+
+        row_meta["frame"].destroy()
+        assessment_rows.remove(row_meta)
+        sync_row_numbers()
+        update_assessment_table_view()
+        refresh_gradebook_summary()
+
+    def add_assessment_row(initial_data=None):
+        row_frame = tk.Frame(rows_container, bg=SURFACE, highlightbackground=BORDER, highlightthickness=1)
+        row_frame.grid(row=len(assessment_rows), column=0, columnspan=7, sticky="ew", padx=spad(2), pady=spad(2))
+
+        for col_index, (_, width) in enumerate(table_columns):
+            row_frame.grid_columnconfigure(col_index, minsize=width, weight=0)
+            row_frame.columnconfigure(col_index, weight=0)
+
+        row_meta = {
+            "frame": row_frame,
+            "record_id": None,
+            "number": tk.Label(row_frame, text="1", bg=SURFACE, fg=TEXT, font=sfont(9), anchor="center", width=4),
+            "type": ttk.Combobox(row_frame, values=["Activity", "Quiz", "Performance Task", "Exam"], state="readonly", width=12),
+            "name": make_entry(row_frame, width=18),
+            "earned": make_entry(row_frame, width=10),
+            "possible": make_entry(row_frame, width=10),
+            "percent": tk.Label(row_frame, text="—", bg=SURFACE, fg=MUTED, font=sfont(9, "bold"), anchor="center", width=10),
+        }
+
+        row_meta["number"].grid(row=0, column=0, padx=0, sticky="nsew")
+        row_meta["type"].grid(row=0, column=1, padx=0, sticky="nsew")
+        row_meta["name"].grid(row=0, column=2, padx=0, sticky="nsew")
+        row_meta["earned"].grid(row=0, column=3, padx=0, sticky="nsew")
+        row_meta["possible"].grid(row=0, column=4, padx=0, sticky="nsew")
+        row_meta["percent"].grid(row=0, column=5, padx=0, sticky="nsew")
+
+        row_meta["type"].set("Activity")
+        row_meta["name"].bind("<KeyRelease>", lambda event: refresh_gradebook_summary())
+        row_meta["earned"].bind("<KeyRelease>", lambda event: refresh_gradebook_summary())
+        row_meta["possible"].bind("<KeyRelease>", lambda event: refresh_gradebook_summary())
+        row_meta["type"].bind("<<ComboboxSelected>>", lambda event: refresh_gradebook_summary())
+
+        delete_button = make_button(row_frame, "DELETE", lambda selected=row_meta: delete_row(selected), RED, width=10)
+        delete_button.grid(row=0, column=6, padx=0, sticky="nsew")
+        row_meta["delete"] = delete_button
+
+        if initial_data is not None:
+            row_meta["record_id"] = initial_data.get("id")
+            row_meta["type"].set(initial_data.get("category", "Activity"))
+            row_meta["name"].insert(0, initial_data.get("assessment_name", ""))
+            row_meta["earned"].insert(0, str(initial_data.get("points_earned", "")))
+            row_meta["possible"].insert(0, str(initial_data.get("possible_points", "")))
+            refresh_row_percent(row_meta)
+        else:
+            refresh_row_percent(row_meta)
+
+        assessment_rows.append(row_meta)
+        sync_row_numbers()
+        update_assessment_table_view()
+        apply_table_scrollregion()
+        refresh_gradebook_summary()
+        globals()["add_assessment_row"] = add_assessment_row
+        globals()["update_assessment_table_view"] = update_assessment_table_view
+        globals()["refresh_gradebook_summary"] = refresh_gradebook_summary
+        return row_meta
+
+    def load_gradebook_rows():
+        student_ref = student_box.get().strip()
+        if not student_ref:
+            for row_meta in list(assessment_rows):
+                row_meta["frame"].destroy()
+            assessment_rows.clear()
+            add_assessment_row()
+            update_assessment_table_view()
+            refresh_gradebook_summary()
+            return
+
+        student = find_student_by_reference(student_ref)
+        student_username = student.get("username", student_ref) if student else student_ref
+        subject = subject_box.get().strip()
+        period = term_box.get().strip() or TERM_NAMES[0]
+        selected_semester = semester_box.get().strip() or selected_semester
+
+        for row_meta in list(assessment_rows):
+            row_meta["frame"].destroy()
+        assessment_rows.clear()
+
+        saved_records = []
+        if student_username and subject:
+            saved_records = assessment_records_for_student(
+                student_username,
+                subject=subject,
+                semester=selected_semester,
+                school_year=school_year,
+                grading_period=period,
+            )
+
+        if saved_records:
+            for record in saved_records:
+                add_assessment_row(record)
+        else:
+            add_assessment_row()
+
+        update_assessment_table_view()
+        refresh_gradebook_summary()
+
+    def refresh_gradebook_summary():
+        refresh_student_status()
+
+        valid_records = []
+        for row_meta in assessment_rows:
+            payload = parse_row_record(row_meta)
+            if payload is not None:
+                valid_records.append(payload)
+
+        category_totals = {
+            "Activity": {"earned": 0.0, "possible": 0.0},
+            "Quiz": {"earned": 0.0, "possible": 0.0},
+            "Performance Task": {"earned": 0.0, "possible": 0.0},
+            "Exam": {"earned": 0.0, "possible": 0.0},
+        }
+
+        for item in valid_records:
+            category = item["category"]
+            category_totals.setdefault(category, {"earned": 0.0, "possible": 0.0})
+            category_totals[category]["earned"] += item["points_earned"]
+            category_totals[category]["possible"] += item["possible_points"]
+
+        category_labels = {
+            "Activity": activity_percentage_label,
+            "Quiz": quiz_percentage_label,
+            "Performance Task": performance_percentage_label,
+            "Exam": exam_percentage_label,
+        }
+
+        for key in category_totals:
+            total = category_totals[key]
+            percentage = None
+            if total["possible"] > 0:
+                percentage = (total["earned"] / total["possible"]) * 100.0
+            category_labels[key].configure(
+                text=(
+                    f"{total['earned']:.2f} / {total['possible']:.2f}  |  {percentage:.2f}%"
+                    if total["possible"] > 0 and percentage is not None
+                    else "0.00 / 0.00  |  —"
+                )
+            )
+
+        required_categories = ["Activity", "Quiz", "Exam", "Performance Task"]
+        missing = [category for category in required_categories if category_totals.get(category, {}).get("possible", 0) <= 0]
+
+        if not valid_records:
+            term_result.configure(text="Weighted term grade (term): —")
+            overall_result.configure(text="Equivalent college grade: —")
+            saved_result.configure(text="Assessment rows: 0 valid entries")
+            return
+
+        activity_pct = (category_totals["Activity"]["earned"] / category_totals["Activity"]["possible"]) * 100.0 if category_totals["Activity"]["possible"] > 0 else None
+        quiz_pct = (category_totals["Quiz"]["earned"] / category_totals["Quiz"]["possible"]) * 100.0 if category_totals["Quiz"]["possible"] > 0 else None
+        exam_pct = (category_totals["Exam"]["earned"] / category_totals["Exam"]["possible"]) * 100.0 if category_totals["Exam"]["possible"] > 0 else None
+        performance_pct = (category_totals["Performance Task"]["earned"] / category_totals["Performance Task"]["possible"]) * 100.0 if category_totals["Performance Task"]["possible"] > 0 else None
+
+        if any(value is None for value in (activity_pct, quiz_pct, exam_pct, performance_pct)):
+            term_result.configure(text="Weighted term grade (term): Need all required categories to compute")
+            overall_result.configure(text="Equivalent college grade: —")
+            saved_result.configure(text=(
+                "Missing category data: " + ", ".join(missing)
+                if missing else "Assessment rows need to be completed"
+            ))
+            return
+
+        written_component = ((activity_pct + quiz_pct) / 2.0) * 0.30
+        exam_component = exam_pct * 0.30
+        performance_component = performance_pct * 0.40
+        weighted_grade = written_component + exam_component + performance_component
+        weighted_grade = round(weighted_grade, 2)
+        grade_point = grade_point_equivalent(weighted_grade)
+
+        term_result.configure(
+            text=f"Weighted term grade ({term_box.get().strip() or 'term'}): {weighted_grade:.2f}%"
         )
+        overall_result.configure(
+            text=(
+                f"Equivalent college grade: {grade_point:.2f}"
+                if grade_point is not None
+                else "Equivalent college grade: —"
+            )
+        )
+        saved_result.configure(text=f"Assessment rows: {len(valid_records)} valid record(s)")
 
-        score_entries[(key, index)] = entry
+    def save_gradebook_rows():
+        student_ref = student_box.get().strip()
+        if not student_ref:
+            messagebox.showerror("Missing Student", "Choose a student before saving assessment rows.", parent=root)
+            return
+
+        student = find_student_by_reference(student_ref)
+        if student is None:
+            messagebox.showerror("Missing Student", f"No student matches '{student_ref}'.", parent=root)
+            return
+
+        subject = subject_box.get().strip()
+        if not subject:
+            messagebox.showerror("Missing Subject", "Choose a subject before saving assessment rows.", parent=root)
+            return
+
+        allowed, reason = semester_open_for_entry(semester_box.get().strip(), school_year)
+        if not allowed:
+            messagebox.showerror("Semester Locked", reason, parent=root)
+            return
+
+        valid_count = 0
+        for row_meta in list(assessment_rows):
+            payload = parse_row_record(row_meta)
+            if payload is None:
+                continue
+
+            valid_count += 1
+            record_id = row_meta.get("record_id")
+            result = (
+                edit_assessment_score(
+                    record_id,
+                    student.get("username", student_ref),
+                    subject,
+                    payload["assessment_name"],
+                    payload["category"],
+                    payload["points_earned"],
+                    payload["possible_points"],
+                    teacher_username=teacher_username,
+                    actor=teacher_username,
+                    semester=semester_box.get().strip(),
+                    school_year=school_year,
+                    grading_period=term_box.get().strip() or TERM_NAMES[0],
+                )
+                if record_id is not None
+                else add_assessment_score(
+                    student.get("username", student_ref),
+                    subject,
+                    payload["assessment_name"],
+                    payload["category"],
+                    payload["points_earned"],
+                    payload["possible_points"],
+                    teacher_username=teacher_username,
+                    actor=teacher_username,
+                    semester=semester_box.get().strip(),
+                    school_year=school_year,
+                    grading_period=term_box.get().strip() or TERM_NAMES[0],
+                )
+            )
+            if not result[0]:
+                messagebox.showerror("Save Failed", result[1], parent=root)
+                return
+
+            if record_id is None:
+                row_meta["record_id"] = next(
+                    item.get("id")
+                    for item in reversed(data_store.get("assessment_scores", []))
+                    if item.get("student_username", "").lower() == student.get("username", student_ref).lower()
+                    and item.get("subject", "").lower() == subject.lower()
+                    and item.get("assessment_name", "").strip().lower() == payload["assessment_name"].lower()
+                )
+
+        if valid_count == 0:
+            messagebox.showwarning("No Valid Rows", "Enter at least one valid assessment row before saving.", parent=root)
+            return
+
+        messagebox.showinfo("Assessment Gradebook Saved", f"Saved {valid_count} assessment record(s).", parent=root)
+        load_gradebook_rows()
+
+    def clear_gradebook_rows():
+        for row_meta in list(assessment_rows):
+            row_meta["frame"].destroy()
+        assessment_rows.clear()
+        add_assessment_row()
+        update_assessment_table_view()
+        refresh_gradebook_summary()
+
+    def update_preview():
+        refresh_student_status()
+        refresh_gradebook_summary()
 
     average_frame = tk.Frame(entry_panel, bg=SURFACE)
     average_frame.pack(fill="x", pady=(spad(4), spad(2)))
 
-    type_average_labels = {}
+    category_labels = {}
+    category_names = [
+        ("Activity", "activity_percentage_label"),
+        ("Quiz", "quiz_percentage_label"),
+        ("Performance Task", "performance_percentage_label"),
+        ("Exam", "exam_percentage_label"),
+    ]
 
-    for key in ASSESSMENT_NAMES:
+    for label_text, variable_name in category_names:
         cell = tk.Frame(average_frame, bg=SURFACE)
-        cell.pack(side="left", padx=spad(6))
+        cell.pack(side="left", padx=spad(10), expand=True, fill="x")
 
         tk.Label(
             cell,
-            text=ASSESSMENT_LABELS[key],
+            text=label_text,
             bg=SURFACE,
             fg=MUTED,
             font=sfont(8)
@@ -5680,15 +6548,18 @@ def show_teacher_assessments(full_name, teacher_username):
 
         value_label = tk.Label(
             cell,
-            text="—",
+            text="0.00 / 0.00  |  —",
             bg=SURFACE,
             fg=TEXT,
-            font=sfont(11)
+            font=sfont(10, "bold")
         )
-
         value_label.pack(anchor="w")
+        category_labels[variable_name] = value_label
 
-        type_average_labels[key] = value_label
+    activity_percentage_label = category_labels["activity_percentage_label"]
+    quiz_percentage_label = category_labels["quiz_percentage_label"]
+    performance_percentage_label = category_labels["performance_percentage_label"]
+    exam_percentage_label = category_labels["exam_percentage_label"]
 
     result_frame = tk.LabelFrame(
         entry_panel,
@@ -5704,12 +6575,11 @@ def show_teacher_assessments(full_name, teacher_username):
 
     term_result = tk.Label(
         result_frame,
-        text="Term college grade: —",
+        text="Weighted term grade (term): —",
         bg=SURFACE,
         fg=TEXT,
         font=sfont(11)
     )
-
     term_result.pack(anchor="w")
 
     tk.Label(
@@ -5726,360 +6596,81 @@ def show_teacher_assessments(full_name, teacher_username):
         font=sfont(8, "normal")
     ).pack(anchor="w")
 
-    tk.Label(
-        result_frame,
-        text=(
-            "Enter assessment scores as percentages (0–100). "
-            "College grades use 1.00 (highest) to 5.00 (failing)."
-        ),
-        bg=SURFACE,
-        fg=MUTED,
-        font=sfont(8, "normal")
-    ).pack(anchor="w")
-
     overall_result = tk.Label(
         result_frame,
-        text="Overall college grade (preview): —",
+        text="Equivalent college grade: —",
         bg=SURFACE,
         fg=TEXT,
         font=sfont(11)
     )
-
     overall_result.pack(anchor="w")
 
     saved_result = tk.Label(
         result_frame,
-        text="Saved terms: none yet",
+        text="Assessment rows: 0 valid record(s)",
         bg=SURFACE,
         fg=MUTED,
         font=sfont(8, "normal")
     )
-
     saved_result.pack(anchor="w", pady=(spad(2), 0))
-
-    def current_target():
-        reference = student_box.get().strip()
-        subject = subject_box.get().strip()
-        term = term_box.get().strip()
-
-        if not reference or not subject:
-            return None, None, None
-
-        student = find_student_by_reference(reference)
-
-        if student is None:
-            return reference, subject, term
-
-        return student.get("username", reference), subject, term
-
-    def collect_scores():
-        scores = {key: [] for key in ASSESSMENT_NAMES}
-        problems = []
-
-        for key, index, label in ASSESSMENT_ITEMS:
-            raw = score_entries[(key, index)].get().strip()
-
-            if not raw:
-                problems.append(f"{label} is empty")
-                continue
-
-            try:
-                value = float(raw)
-            except ValueError:
-                problems.append(f"{label} is not a number")
-                continue
-
-            if value < 0 or value > 100:
-                problems.append(f"{label} must be between 0 and 100")
-                continue
-
-            scores[key].append(value)
-
-        return scores, problems
-
-    def update_preview():
-        refresh_student_status()
-
-        scores, problems = collect_scores()
-
-        for key in ASSESSMENT_NAMES:
-            values = scores[key]
-
-            if values:
-                average = sum(values) / len(values)
-
-                type_average_labels[key].configure(
-                    text=f"{average:.2f}"
-                )
-            else:
-                type_average_labels[key].configure(text="—")
-
-        student, subject, term = current_target()
-
-        record = None
-
-        if student and subject:
-            record = find_grade_record(student, subject)
-
-        saved_terms = []
-
-        if record:
-            saved_terms = completed_term_grades(record.get("terms", {}))
-
-        if saved_terms:
-            saved_result.configure(
-                text=(
-                    "Saved terms: "
-                    + ", ".join(
-                        f"{name} {format_college_grade(value)}"
-                        for name, value in saved_terms
-                    )
-                )
-            )
-        else:
-            saved_result.configure(text="Saved terms: none yet")
-
-        if problems:
-            term_result.configure(
-                text=(
-                    "Term college grade: waiting for "
-                    f"{len(problems)} input(s)"
-                )
-            )
-
-            overall_result.configure(
-                text="Overall college grade (preview): —"
-            )
-
-            return None
-
-        cleaned = {key: scores[key] for key in ASSESSMENT_NAMES}
-        term_grade = compute_term_grade(cleaned)
-
-        term_result.configure(
-        text=(
-            f"Term college grade ({term or 'term'}): "
-            f"{format_college_grade(term_grade)}"
-        )
-        )
-
-        preview_terms = {}
-
-        if record:
-            preview_terms = {
-                name: dict(block)
-                for name, block in record.get("terms", {}).items()
-                if isinstance(block, dict)
-            }
-
-        preview_name = term or TERM_NAMES[0]
-
-        preview_block = dict(cleaned)
-        preview_block["term_grade"] = term_grade
-
-        preview_terms[preview_name] = preview_block
-
-        overall = overall_grade_for_terms(preview_terms)
-
-        overall_result.configure(
-            text=(
-                "Overall college grade (preview): "
-                + format_college_grade(overall)
-            )
-        )
-
-        return term_grade
-
-    def handle_calculate():
-        student, subject, term = current_target()
-
-        if not student or not subject:
-            messagebox.showerror(
-                "Missing Information",
-                "Choose a student, an assigned subject and a term.",
-                parent=root
-            )
-            return
-
-        term_grade = update_preview()
-
-        if term_grade is None:
-            messagebox.showerror(
-                "Incomplete Scores",
-                "Enter every score of the selected term "
-                "before calculating.",
-                parent=root
-            )
-            return
-
-        messagebox.showinfo(
-            "Calculation Result",
-            (
-                f"{term} college grade of {student} in {subject}: "
-                f"{format_college_grade(term_grade)}"
-            ),
-            parent=root
-        )
-
-    def handle_save():
-        student, subject, term = current_target()
-
-        if not student or not subject:
-            messagebox.showerror(
-                "Missing Information",
-                "Choose a student, an assigned subject and a term.",
-                parent=root
-            )
-            return
-
-        if not term:
-            messagebox.showerror(
-                "Missing Information",
-                "Choose a term.",
-                parent=root
-            )
-            return
-
-        scores, problems = collect_scores()
-
-        if problems:
-            messagebox.showerror(
-                "Incomplete Scores",
-                "Please fix the following:\n\n"
-                + "\n".join(problems),
-                parent=root
-            )
-            return
-
-        success, message = save_term_grade(
-            student,
-            subject,
-            term,
-            scores,
-            teacher_username=teacher_username,
-            actor=teacher_username
-        )
-
-        if success:
-            messagebox.showinfo(
-                "Term Grade Saved",
-                message,
-                parent=root
-            )
-
-            update_preview()
-
-        else:
-            messagebox.showerror(
-                "Grade Error",
-                message,
-                parent=root
-            )
-
-    def handle_load():
-        student, subject, term = current_target()
-
-        if not student or not subject:
-            messagebox.showerror(
-                "Missing Information",
-                "Choose a student, an assigned subject and a term.",
-                parent=root
-            )
-            return
-
-        record = find_grade_record(student, subject)
-
-        if record is None:
-            messagebox.showinfo(
-                "No Saved Grades",
-                "This student has no saved record for the "
-                "selected subject yet.",
-                parent=root
-            )
-            return
-
-        block = record.get("terms", {}).get(term)
-
-        if not isinstance(block, dict):
-            messagebox.showinfo(
-                "No Saved Grades",
-                f"No {term} scores are saved for this student yet.",
-                parent=root
-            )
-            return
-
-        for key, index, label in ASSESSMENT_ITEMS:
-            values = block.get(key) or []
-
-            value = values[index] if index < len(values) else ""
-
-            entry = score_entries[(key, index)]
-
-            entry.delete(0, tk.END)
-
-            if value != "":
-                entry.insert(0, f"{float(value):g}")
-
-        update_preview()
-
-    def handle_clear():
-        for entry in score_entries.values():
-            entry.delete(0, tk.END)
-
-        update_preview()
 
     button_row = tk.Frame(entry_panel, bg=SURFACE)
     button_row.pack(fill="x", pady=(spad(6), spad(2)))
 
     make_button(
         button_row,
-        "CALCULATE TERM GRADE",
-        handle_calculate,
-        BLUE
-    ).pack(side="left", padx=(0, spad(6)))
-
-    make_button(
-        button_row,
-        "SAVE TERM GRADE",
-        handle_save,
+        "+ ADD ASSESSMENT ROW",
+        lambda: add_assessment_row(),
         GREEN
     ).pack(side="left", padx=(0, spad(6)))
 
     make_button(
         button_row,
+        "SAVE ASSESSMENTS",
+        save_gradebook_rows,
+        BLUE
+    ).pack(side="left", padx=(0, spad(6)))
+
+    make_button(
+        button_row,
         "LOAD SAVED",
-        handle_load,
+        load_gradebook_rows,
         PURPLE
     ).pack(side="left", padx=(0, spad(6)))
 
     make_button(
         button_row,
         "CLEAR",
-        handle_clear,
+        clear_gradebook_rows,
         GRAY
     ).pack(side="left")
 
     subject_box.bind(
         "<<ComboboxSelected>>",
-        lambda event: update_preview()
+        lambda event: load_gradebook_rows()
     )
 
     student_box.bind(
         "<KeyRelease>",
-        lambda event: update_preview()
+        lambda event: (refresh_student_status(), load_gradebook_rows())
     )
 
     student_box.bind(
         "<<ComboboxSelected>>",
-        lambda event: update_preview()
+        lambda event: load_gradebook_rows()
     )
 
     term_box.bind(
         "<<ComboboxSelected>>",
-        lambda event: update_preview()
+        lambda event: load_gradebook_rows()
     )
 
-    update_preview()
+    semester_box.bind(
+        "<<ComboboxSelected>>",
+        lambda event: load_gradebook_rows()
+    )
+
+    load_gradebook_rows()
 
 
 def show_teacher_performance(full_name, teacher_username):
@@ -6143,6 +6734,7 @@ def show_teacher_performance(full_name, teacher_username):
         selector_row,
         text="Subject:",
         bg=SURFACE,
+        fg=TEXT,
         font=sfont(9)
     ).pack(side="left", padx=(spad(2), spad(4)))
 
@@ -6216,10 +6808,9 @@ def show_teacher_performance(full_name, teacher_username):
         else:
             class_stats_label.configure(
                 text=(
-                    f"Class average: "
-                    f"{format_college_grade(report['class_average'])}   |   "
-                    f"Best: {format_college_grade(report['highest'])}   |   "
-                    f"Lowest: {format_college_grade(report['lowest'])}   |   "
+                    f"Class average: {report['class_average']:.2f}   |   "
+                    f"Highest: {report['highest']:.2f}   |   "
+                    f"Lowest: {report['lowest']:.2f}   |   "
                     f"Passed: {report['passing']}   |   "
                     f"Failed: {report['failing']}"
                 )
@@ -6235,14 +6826,14 @@ def show_teacher_performance(full_name, teacher_username):
                 value = row["terms"].get(term)
 
                 if isinstance(value, (int, float)):
-                    values.append(format_college_grade(value))
+                    values.append(f"{value:.2f}")
                 else:
                     values.append("—")
 
             overall = row["overall"]
 
             if isinstance(overall, (int, float)):
-                values.append(format_college_grade(overall))
+                values.append(format_overall_grade_display(overall))
             else:
                 values.append("—")
 
@@ -6316,7 +6907,7 @@ def build_teacher_records(parent, teacher_username):
                 value = terms.get(term, {}).get("term_grade")
 
                 if isinstance(value, (int, float)):
-                    term_grades.append(format_college_grade(value))
+                    term_grades.append(f"{value:.2f}")
                 else:
                     term_grades.append("—")
 
@@ -6326,7 +6917,7 @@ def build_teacher_records(parent, teacher_username):
                 overall = overall_grade_for_terms(terms)
 
             if isinstance(overall, (int, float)):
-                overall_text = format_college_grade(overall)
+                overall_text = format_overall_grade_display(overall)
                 status = (
                     "PASSED"
                     if float(overall) >= PASSING_GRADE
@@ -6599,7 +7190,11 @@ def show_teacher_subjects(full_name, teacher_username):
                     row.get("student_id", "") or "—",
                     row.get("student_name", "") or row["student_username"],
                     row["student_username"],
-                    format_college_grade(overall),
+                    (
+                        format_overall_grade_display(overall)
+                        if isinstance(overall, (int, float))
+                        else "—"
+                    ),
                     row["status"]
                 )
             )
@@ -6662,12 +7257,13 @@ def student_menu_items(student_username, full_name, section="overview"):
     ]
 
 
-def show_student_dashboard(student_username, full_name, section="overview"):
+def show_student_dashboard(student_username, full_name, section="overview", selected_semester=None):
     global CURRENT_SCREEN
     CURRENT_SCREEN = lambda: show_student_dashboard(
         student_username,
         full_name,
-        section
+        section,
+        selected_semester
     )
     clear_screen()
     build_header(
@@ -6685,46 +7281,54 @@ def show_student_dashboard(student_username, full_name, section="overview"):
         height=WINDOW_HEIGHT - HEADER_HEIGHT
     )
 
-    performance = student_performance(student_username)
+    school_year = data_store.get("settings", {}).get("school_year", current_school_year())
+    selected_semester = selected_semester or data_store.get("settings", {}).get("current_semester", SEMESTER_NAMES[0])
+    performance = student_performance(student_username, selected_semester, school_year)
     subjects = performance["subjects"]
-    student_account = find_user(student_username)
-    student_block = (
-        student_account.get("block", "") if student_account else ""
+
+    make_dashboard_banner(
+        content,
+        "My Academic Performance",
+        (
+            f"{full_name}  ·  {student_username}  ·  "
+            f"Student ID {student_id_of(student_username) or '—'}"
+        ),
+        lambda: show_student_dashboard(
+            student_username,
+            full_name,
+            section,
+            selected_semester
+        )
     )
 
-    title_row = tk.Frame(content, bg=PAGE_BG)
-    title_row.pack(
-        fill="x",
-        padx=spad(22),
-        pady=(spad(10), spad(4))
-    )
+    semester_row = tk.Frame(content, bg=PAGE_BG)
+    semester_row.pack(fill="x", padx=spad(22), pady=(0, spad(8)))
 
     tk.Label(
-        title_row,
-        text="My Academic Performance",
-        font=sfont(20),
+        semester_row,
+        text=f"Selected Semester: {selected_semester}  |  School Year: {school_year}",
         bg=PAGE_BG,
-        fg=TEXT
+        fg=TEXT,
+        font=sfont(10)
     ).pack(side="left")
 
-    tk.Label(
-        title_row,
-        text=(
-            f"{full_name}  |  {student_username}  |  "
-            f"ID No. {student_id_of(student_username) or '—'}  |  "
-            f"{student_block or 'Block unassigned'}"
-        ),
-        font=sfont(9, "normal"),
-        bg=PAGE_BG,
-        fg=MUTED
-    ).pack(side="left", padx=spad(12))
-
-    make_button(
-        title_row,
-        "REFRESH",
-        lambda: show_student_dashboard(student_username, full_name, section),
-        GRAY
-    ).pack(side="right")
+    semester_box = ttk.Combobox(
+        semester_row,
+        values=SEMESTER_NAMES,
+        state="readonly",
+        width=20
+    )
+    semester_box.set(selected_semester)
+    semester_box.pack(side="left", padx=spad(10))
+    semester_box.bind(
+        "<<ComboboxSelected>>",
+        lambda event: show_student_dashboard(
+            student_username,
+            full_name,
+            section,
+            semester_box.get()
+        )
+    )
 
     general_average = performance["general_average"]
 
@@ -6753,8 +7357,9 @@ def show_student_dashboard(student_username, full_name, section="overview"):
 
     card_data = [
         (
-            "General Average (GPA)",
-            format_college_grade(general_average),
+            "General Average",
+            f"{general_average:.2f}"
+            if general_average is not None else "—",
             BLUE
         ),
         ("Subjects", performance["subjects_count"], PURPLE),
@@ -6775,13 +7380,14 @@ def show_student_dashboard(student_username, full_name, section="overview"):
 
     summary_frame = tk.LabelFrame(
         content,
-        text="Subject Summary",
+        text=f"Subject Summary - {selected_semester}",
         font=sfont(10),
         bg=SURFACE,
         fg=TEXT,
         padx=spad(6),
         pady=spad(6)
     )
+    style_dashboard_panel(summary_frame)
 
     summary_columns = (
         "Subject",
@@ -6792,7 +7398,7 @@ def show_student_dashboard(student_username, full_name, section="overview"):
         "Finals",
         "Overall",
         "Trend",
-        "Class GPA",
+        "Class Avg",
         "Rank",
         "Status",
         "Remark"
@@ -6815,61 +7421,70 @@ def show_student_dashboard(student_username, full_name, section="overview"):
 
     summary_table.pack(fill="x")
 
-    for item in subjects:
-        values = [
-            item["subject"],
-            item["teacher_name"] or "—"
-        ]
+    if not subjects:
+        tk.Label(
+            summary_frame,
+            text="No grades available for this semester yet.",
+            bg=SURFACE,
+            fg=MUTED,
+            font=sfont(10, "normal")
+        ).pack(anchor="w", pady=spad(6))
+    else:
+        for item in subjects:
+            values = [
+                item["subject"],
+                item["teacher_name"] or "—"
+            ]
 
-        for term in TERM_NAMES:
-            value = item["terms"].get(term)
+            for term in TERM_NAMES:
+                value = item["terms"].get(term)
 
-            if isinstance(value, (int, float)):
-                values.append(format_college_grade(value))
+                if isinstance(value, (int, float)):
+                    values.append(f"{value:.2f}")
+                else:
+                    values.append("—")
+
+            overall = item["overall"]
+            class_average = item["class_average"]
+
+            values.append(
+                format_overall_grade_display(overall)
+                if isinstance(overall, (int, float))
+                else "—"
+            )
+
+            completed = [
+                item["terms"][term]
+                for term in TERM_NAMES
+                if isinstance(item["terms"].get(term), (int, float))
+            ]
+
+            if len(completed) >= 2:
+                delta = completed[-1] - completed[-2]
+
+                if delta > 0.004:
+                    values.append(f"▲ {delta:.2f}")
+                elif delta < -0.004:
+                    values.append(f"▼ {abs(delta):.2f}")
+                else:
+                    values.append("= 0.00")
             else:
                 values.append("—")
 
-        overall = item["overall"]
-        class_average = item["class_average"]
-
-        values.append(
-            format_college_grade(overall)
-        )
-
-        completed = [
-            item["terms"][term]
-            for term in TERM_NAMES
-            if isinstance(item["terms"].get(term), (int, float))
-        ]
-
-        if len(completed) >= 2:
-            delta = (
-                college_grade_for_percentage(completed[-1])
-                - college_grade_for_percentage(completed[-2])
+            values.append(
+                f"{class_average:.2f}"
+                if isinstance(class_average, (int, float)) else "—"
             )
 
-            if delta < -0.004:
-                values.append(f"▲ {abs(delta):.2f}")
-            elif delta > 0.004:
-                values.append(f"▼ {abs(delta):.2f}")
-            else:
-                values.append("= 0.00")
-        else:
-            values.append("—")
+            values.append(
+                f"{item['rank']} of {item['class_size']}"
+                if item["rank"] else "—"
+            )
 
-        values.append(
-            format_college_grade(class_average)
-        )
+            values.append(item["status"])
+            values.append(item["remark"])
 
-        values.append(
-            f"{item['rank']} of {item['class_size']}"
-            if item["rank"] else "—"
-        )
-
-        values.append(item["status"])
-        values.append(item["remark"])
-
-        summary_table.insert("", "end", values=values)
+            summary_table.insert("", "end", values=values)
 
     detail_frame = tk.LabelFrame(
         content,
@@ -6905,6 +7520,7 @@ def show_student_dashboard(student_username, full_name, section="overview"):
         padx=spad(10),
         pady=spad(8)
     )
+    style_dashboard_panel(announcements_frame)
 
     announcements_frame.pack(
         fill="both" if section == "overview" else "x",
@@ -7027,14 +7643,16 @@ def show_student_dashboard(student_username, full_name, section="overview"):
                 value = block.get("term_grade")
 
             if isinstance(value, (int, float)):
-                term_values.append(format_college_grade(value))
+                term_values.append(f"{float(value):.2f}")
             else:
                 term_values.append("—")
 
         overall = overall_grade_for_terms(terms)
 
         term_values.append(
-            format_college_grade(overall)
+            format_overall_grade_display(overall)
+            if isinstance(overall, (int, float))
+            else "—"
         )
 
         table.insert("", "end", values=term_values)
@@ -7093,14 +7711,14 @@ def show_student_dashboard(student_username, full_name, section="overview"):
                 breakdown_host,
                 text=(
                     f"Overall grade: "
-                    f"{format_college_grade(current['overall'])}   |   "
+                    f"{format_overall_grade_display(current['overall'])}   |   "
                     f"Status: {current['status']}   |   "
                     f"Remark: {current['remark']}   |   "
                     f"Teacher: {current['teacher_name'] or '—'}   |   "
                     f"Terms completed: {current['terms_completed']} of 4   |   "
-                    f"Class GPA: "
+                    f"Class average: "
                     + (
-                        format_college_grade(current["class_average"])
+                        f"{current['class_average']:.2f}"
                         if isinstance(
                             current["class_average"],
                             (int, float)
@@ -7127,13 +7745,13 @@ def show_student_dashboard(student_username, full_name, section="overview"):
 
         tk.Label(
             planner_row,
-            text="Target college grade (1.00–5.00):",
+            text="Target overall grade:",
             bg=SURFACE,
             fg=TEXT,
             font=sfont(10)
         ).pack(side="left")
 
-        target_var = tk.StringVar(value="2.00")
+        target_var = tk.StringVar(value="90")
 
         target_entry = make_entry(
             planner_row,
@@ -7144,10 +7762,7 @@ def show_student_dashboard(student_username, full_name, section="overview"):
 
         tk.Label(
             planner_row,
-            text=(
-                "1.00 is highest; 5.00 is lowest. "
-                "Required scores remain percentages."
-            ),
+            text="Enter a target from 0 to 100 to see what you need.",
             bg=SURFACE,
             fg=MUTED,
             font=sfont(8, "normal")
@@ -7173,21 +7788,17 @@ def show_student_dashboard(student_username, full_name, section="overview"):
                 target = float(raw)
             except ValueError:
                 target_result.configure(
-                    text="Enter a college grade point from 1.00 to 5.00.",
+                    text="Enter a number between 0 and 100.",
                     fg=MUTED
                 )
                 return
 
-            if target < 1 or target > 5:
+            if target < 0 or target > 100:
                 target_result.configure(
-                    text="Target must be between 1.00 and 5.00.",
+                    text="Target must be between 0 and 100.",
                     fg=MUTED
                 )
                 return
-
-            target_percentage = minimum_percentage_for_college_grade(
-                target
-            )
 
             completed = completed_term_grades(terms)
 
@@ -7201,8 +7812,8 @@ def show_student_dashboard(student_username, full_name, section="overview"):
             if not remaining:
                 target_result.configure(
                     text=(
-                        "All terms are recorded, so the college grade is "
-                        f"fixed at {format_college_grade(overall)}."
+                        "All terms are recorded, so the overall grade is "
+                        f"fixed at {overall:.2f}."
                     ),
                     fg=MUTED
                 )
@@ -7211,7 +7822,7 @@ def show_student_dashboard(student_username, full_name, section="overview"):
             total = sum(value for _, value in completed)
 
             needed = (
-                target_percentage * len(TERM_NAMES) - total
+                target * len(TERM_NAMES) - total
             ) / len(remaining)
 
             if needed <= 0:
@@ -7219,7 +7830,7 @@ def show_student_dashboard(student_username, full_name, section="overview"):
                     text=(
                         "Target already secured - any score on the "
                         f"remaining {len(remaining)} term(s) keeps you at "
-                        f"or better than {target:.2f}."
+                        f"or above {target:.2f}."
                     ),
                     fg=GREEN
                 )
@@ -7227,9 +7838,9 @@ def show_student_dashboard(student_username, full_name, section="overview"):
             elif needed > 100:
                 target_result.configure(
                     text=(
-                        f"You would need {needed:.2f}% on average across "
+                        f"You would need {needed:.2f} on average across "
                         f"the remaining {len(remaining)} term(s) to finish "
-                        f"at {target:.2f} - above the 100% maximum."
+                        f"at {target:.2f} - above the 100.00 maximum."
                     ),
                     fg=RED
                 )
@@ -7237,11 +7848,10 @@ def show_student_dashboard(student_username, full_name, section="overview"):
             else:
                 target_result.configure(
                     text=(
-                        f"You need {needed:.2f}% (college grade "
-                        f"{format_college_grade(needed)}) on average across "
-                        f"the remaining {len(remaining)} term(s) "
+                        f"You need {needed:.2f} on average across the "
+                        f"remaining {len(remaining)} term(s) "
                         f"({', '.join(remaining)}) to finish at "
-                        f"{target:.2f} or better."
+                        f"{target:.2f}."
                     ),
                     fg=TEXT
                 )

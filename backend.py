@@ -4,7 +4,6 @@ import hashlib
 import hmac
 import json
 import os
-import random
 from datetime import datetime
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -76,18 +75,23 @@ def assessment_item_count(key):
 
 ROLES = ["Admin", "Teacher", "Student"]
 
+SEMESTER_NAMES = ["First Semester", "Second Semester"]
+SEMESTER_STATUS_OPTIONS = ["Not Started", "In Progress", "Completed", "Reopened"]
+DEFAULT_SCHOOL_YEAR = "2026-2027"
+
 PASSING_GRADE = 75.0
-COLLEGE_GRADE_BANDS = (
-    (97, 1.00),
-    (94, 1.25),
-    (91, 1.50),
-    (88, 1.75),
-    (85, 2.00),
-    (82, 2.25),
-    (79, 2.50),
-    (76, 2.75),
-    (75, 3.00),
-    (0, 5.00),
+
+GRADE_POINT_EQUIVALENCE = (
+    (1.00, 96.0, 101.0),
+    (1.25, 94.0, 96.0),
+    (1.50, 91.0, 94.0),
+    (1.75, 88.0, 91.0),
+    (2.00, 85.0, 88.0),
+    (2.25, 83.0, 85.0),
+    (2.50, 80.0, 83.0),
+    (2.75, 78.0, 80.0),
+    (3.00, 75.0, 78.0),
+    (5.00, 0.0, 75.0),
 )
 
 DEFAULT_SUBJECTS = [
@@ -99,12 +103,7 @@ DEFAULT_SUBJECTS = [
     "Computer",
 ]
 
-PROTECTED_USERNAMES = ("admin", "teacher", "student")
-STUDENT_BLOCKS = ("Block A", "Block B")
-ACCOUNT_ID_FORMATS = {
-    "Student": ("C25-", 101),
-    "Teacher": ("T25-", 201)
-}
+PROTECTED_USERNAMES = ("admin",)
 
 MAX_ACTIVITY_ENTRIES = 500
 
@@ -113,39 +112,50 @@ MAX_ANNOUNCEMENTS = 100
 ANNOUNCEMENT_AUDIENCES = ("Everyone", "Students", "Teachers")
 
 
+def default_school_year():
+    now = datetime.now()
+    return f"{now.year}-{now.year + 1}"
+
+
+def normalize_semester_name(value):
+    if value is None:
+        return "First Semester"
+
+    text = str(value).strip()
+    if text in SEMESTER_NAMES:
+        return text
+    if text.lower() == "first semester":
+        return "First Semester"
+    if text.lower() == "second semester":
+        return "Second Semester"
+    return "First Semester"
+
+
+def normalize_school_year(value):
+    text = str(value or "").strip()
+    if text:
+        return text
+    return default_school_year()
+
+
 def empty_store():
     return {
         "users": [],
         "grades": [],
+        "assessment_scores": [],
         "subjects": list(DEFAULT_SUBJECTS),
         "activity_log": [],
         "announcements": [],
         "settings": {
-            "theme": "light"
+            "theme": "light",
+            "school_year": default_school_year(),
+            "current_semester": "First Semester",
+            "semester_statuses": {
+                "First Semester": "Not Started",
+                "Second Semester": "Not Started"
+            }
         }
     }
-
-
-def next_account_id(role, users=None):
-    """Return the first unused account ID in the role's numbering series."""
-
-    id_format = ACCOUNT_ID_FORMATS.get(role)
-
-    if id_format is None:
-        return ""
-
-    prefix, first_number = id_format
-    used_ids = {
-        str(user.get("student_id", "")).strip().upper()
-        for user in (users if users is not None else data_store["users"])
-    }
-
-    number = first_number
-
-    while f"{prefix}{number:04d}".upper() in used_ids:
-        number += 1
-
-    return f"{prefix}{number:04d}"
 
 
 def normalize_term_block(block):
@@ -185,6 +195,14 @@ def normalize_grade_record(record):
 
     if not isinstance(record, dict):
         return record
+
+    record.setdefault("semester", "First Semester")
+    record["semester"] = normalize_semester_name(record.get("semester"))
+    record.setdefault("school_year", default_school_year())
+    record["school_year"] = normalize_school_year(record.get("school_year"))
+    record.setdefault("semester_status", "Not Started")
+    record.setdefault("grading_status", "Complete")
+    record.setdefault("audit_note", "")
 
     stored_terms = record.get("terms")
 
@@ -255,13 +273,7 @@ def load_data():
         )
 
         user.setdefault("student_id", "")
-        user.setdefault("block", "")
-
-        if (
-            user.get("role", "").lower() == "student"
-            and user["block"] not in STUDENT_BLOCKS
-        ):
-            user["block"] = random.choice(STUDENT_BLOCKS)
+        user.setdefault("teacher_id", "")
 
         if not isinstance(user.get("subjects"), list):
             user["subjects"] = []
@@ -270,6 +282,16 @@ def load_data():
         normalize_grade_record(grade)
         for grade in grades
         if isinstance(grade, dict)
+    ]
+
+    assessment_scores = saved_data.get("assessment_scores", [])
+    if not isinstance(assessment_scores, list):
+        assessment_scores = []
+
+    assessment_scores = [
+        normalize_assessment_record(score)
+        for score in assessment_scores
+        if isinstance(score, dict)
     ]
 
     cleaned_announcements = []
@@ -300,10 +322,24 @@ def load_data():
         subjects = list(DEFAULT_SUBJECTS)
 
     settings.setdefault("theme", "light")
+    settings.setdefault("school_year", default_school_year())
+    settings["school_year"] = normalize_school_year(settings.get("school_year"))
+    initialize_account_ids(users, settings)
+    settings.setdefault("current_semester", "First Semester")
+    settings["current_semester"] = normalize_semester_name(
+        settings.get("current_semester")
+    )
+    semester_statuses = settings.get("semester_statuses", {})
+    if not isinstance(semester_statuses, dict):
+        semester_statuses = {}
+    for semester in SEMESTER_NAMES:
+        semester_statuses.setdefault(semester, "Not Started")
+    settings["semester_statuses"] = semester_statuses
 
     return {
         "users": users,
         "grades": grades,
+        "assessment_scores": assessment_scores,
         "subjects": subjects,
         "activity_log": activity_log,
         "announcements": announcements,
@@ -311,7 +347,130 @@ def load_data():
     }
 
 
+def initialize_account_ids(users, settings):
+    """Backfill generated IDs for existing student and teacher accounts."""
+    school_year_start = normalize_school_year(
+        settings.get("school_year")
+    ).split("-", 1)[0]
+    year = (
+        school_year_start[-2:]
+        if school_year_start.isdigit()
+        else str(datetime.now().year)[-2:]
+    )
+    counters = settings.get("account_id_counters")
+    if not isinstance(counters, dict):
+        counters = {}
+
+    for role, prefix, field in (
+        ("Student", "C", "student_id"),
+        ("Teacher", "T", "teacher_id"),
+    ):
+        id_prefix = f"{prefix}{year}-"
+        counter_key = f"{prefix}{year}"
+        try:
+            sequence_number = max(0, int(counters.get(counter_key, 0)))
+        except (TypeError, ValueError):
+            sequence_number = 0
+
+        for user in users:
+            if not isinstance(user, dict):
+                continue
+            value = str(user.get(field, "")).strip()
+            if value.startswith(id_prefix):
+                suffix = value[len(id_prefix):]
+                if suffix.isdigit():
+                    sequence_number = max(sequence_number, int(suffix))
+
+        for user in users:
+            if not isinstance(user, dict):
+                continue
+            if user.get("role", "").lower() != role.lower():
+                continue
+            if str(user.get(field, "")).strip():
+                continue
+
+            sequence_number += 1
+            user[field] = f"{id_prefix}{sequence_number:04d}"
+
+        if sequence_number:
+            counters[counter_key] = sequence_number
+
+    if counters:
+        settings["account_id_counters"] = counters
+
+
 data_store = load_data()
+
+
+def normalize_assessment_category(value):
+    text = str(value or "").strip()
+    mapping = {
+        "activity": "Activity",
+        "activities": "Activity",
+        "quiz": "Quiz",
+        "quizzes": "Quiz",
+        "exam": "Exam",
+        "exams": "Exam",
+        "performance task": "Performance Task",
+        "performance_task": "Performance Task",
+        "performance tasks": "Performance Task",
+        "performance_tasks": "Performance Task",
+    }
+    return mapping.get(text.lower(), text or "Activity")
+
+
+def normalize_grading_period(value):
+    text = str(value or "").strip()
+    for period in TERM_NAMES:
+        if text.lower() == period.lower():
+            return period
+    return TERM_NAMES[0]
+
+
+def normalize_assessment_record(record):
+    """Migrate a tally record to the current structure."""
+    if not isinstance(record, dict):
+        return record
+
+    record.setdefault("student_username", "")
+    record.setdefault("subject", "")
+    record.setdefault("teacher_username", "")
+    record.setdefault("assessment_name", "")
+    record.setdefault("category", "Activity")
+    record.setdefault("semester", "First Semester")
+    record.setdefault("school_year", default_school_year())
+    record.setdefault("grading_period", TERM_NAMES[0])
+    record.setdefault("points_earned", 0.0)
+    record.setdefault("possible_points", 0.0)
+    record.setdefault("percentage", 0.0)
+    record.setdefault("updated_at", timestamp())
+
+    record["category"] = normalize_assessment_category(record.get("category"))
+    record["semester"] = normalize_semester_name(record.get("semester"))
+    record["school_year"] = normalize_school_year(record.get("school_year"))
+    record["grading_period"] = normalize_grading_period(record.get("grading_period"))
+
+    try:
+        record["points_earned"] = float(record.get("points_earned", 0.0))
+    except (TypeError, ValueError):
+        record["points_earned"] = 0.0
+
+    try:
+        record["possible_points"] = float(record.get("possible_points", 0.0))
+    except (TypeError, ValueError):
+        record["possible_points"] = 0.0
+
+    record["assessment_name"] = str(record.get("assessment_name", "")).strip()
+    record["subject"] = str(record.get("subject", "")).strip()
+    record["student_username"] = str(record.get("student_username", "")).strip()
+    record["teacher_username"] = str(record.get("teacher_username", "")).strip()
+
+    record["percentage"] = calculate_assessment_percentage(
+        record["points_earned"],
+        record["possible_points"],
+    )
+
+    return record
 
 
 def save_data():
@@ -630,21 +789,13 @@ def create_default_user(
     )
 
     if existing is not None:
-        changed = False
-
         if (
             role == "Student"
             and student_id
             and not existing.get("student_id")
         ):
             existing["student_id"] = student_id
-            changed = True
 
-        if role == "Student" and existing.get("block") not in STUDENT_BLOCKS:
-            existing["block"] = random.choice(STUDENT_BLOCKS)
-            changed = True
-
-        if changed:
             try:
                 save_data()
             except OSError:
@@ -661,7 +812,6 @@ def create_default_user(
         "active": True,
         "protected": username.lower() in PROTECTED_USERNAMES,
         "student_id": student_id if role == "Student" else "",
-        "block": random.choice(STUDENT_BLOCKS) if role == "Student" else "",
         "subjects": []
     }
 
@@ -675,6 +825,19 @@ def create_default_user(
 
 
 def ensure_default_users():
+    for username in ("teacher", "student"):
+        existing = find_user(username)
+        if existing is not None:
+            data_store["users"] = [
+                user for user in data_store["users"]
+                if user.get("username", "").lower() != username.lower()
+            ]
+
+            try:
+                save_data()
+            except OSError:
+                pass
+
     defaults = [
         (
             "admin",
@@ -682,20 +845,6 @@ def ensure_default_users():
             "Admin",
             "System Administrator",
             ""
-        ),
-        (
-            "teacher",
-            "teacher123",
-            "Teacher",
-            "SMCII Teacher",
-            ""
-        ),
-        (
-            "student",
-            "student123",
-            "Student",
-            "Sample Student",
-            "2024-0001"
         )
     ]
 
@@ -737,16 +886,16 @@ def is_admin_account(user):
     return user.get("role", "").lower() == "admin"
 
 
-def authenticate_user(username, password, role=""):
-    username = (username or "").strip().lower()
-    password = (password or "").strip()
-    requested_role = (role or "").strip().lower()
+def authenticate_user(username, password, role):
+    username = username.strip().lower()
+    password = password.strip()
+    role = role.strip().lower()
 
     for user in data_store["users"]:
         if user.get("username", "").lower() != username:
             continue
 
-        if requested_role and user.get("role", "").lower() != requested_role:
+        if user.get("role", "").lower() != role:
             continue
 
         if not verify_password(user.get("password", ""), password):
@@ -804,7 +953,28 @@ def add_user(
         if user.get("username", "").lower() == username.lower():
             return False, "This username already exists."
 
-    cleaned_id = next_account_id(role)
+    cleaned_id = ""
+    teacher_id = ""
+    generated_id = ""
+    counter_key = None
+    next_sequence = None
+
+    if role == "Student":
+        if student_id:
+            cleaned_id, error = clean_student_id(student_id)
+            if error:
+                return False, error
+            if student_id_taken(cleaned_id):
+                return False, (
+                    f"ID number '{cleaned_id}' is already used "
+                    "by another student."
+                )
+        else:
+            generated_id, counter_key, next_sequence = next_account_id("Student")
+            cleaned_id = generated_id
+    elif role == "Teacher":
+        teacher_id, counter_key, next_sequence = next_account_id("Teacher")
+        generated_id = teacher_id
 
     assigned = clean_subject_list(subjects)
 
@@ -817,9 +987,22 @@ def add_user(
         "active": True,
         "protected": False,
         "student_id": cleaned_id,
-        "block": random.choice(STUDENT_BLOCKS) if role == "Student" else "",
+        "teacher_id": teacher_id,
         "subjects": assigned if role == "Teacher" else []
     }
+
+    settings = data_store.setdefault("settings", {})
+    original_counters = settings.get("account_id_counters")
+    counters = (
+        original_counters
+        if isinstance(original_counters, dict)
+        else {}
+    )
+    previous_counter = None
+    if counter_key is not None:
+        previous_counter = counters.get(counter_key)
+        counters[counter_key] = next_sequence
+        settings["account_id_counters"] = counters
 
     data_store["users"].append(new_user)
 
@@ -831,17 +1014,10 @@ def add_user(
             actor
         )
 
-        if cleaned_id:
+        if generated_id:
             commit_activity(
                 "Account ID number assigned",
-                f"{username} uses ID number {cleaned_id}",
-                actor
-            )
-
-        if new_user["block"]:
-            commit_activity(
-                "Student assigned to block",
-                f"{username} assigned to {new_user['block']}",
+                f"{username} uses ID number {generated_id}",
                 actor
             )
 
@@ -852,16 +1028,74 @@ def add_user(
                 actor
             )
 
-        message = f"Account created successfully. ID Number: {cleaned_id}."
-
-        if new_user["block"]:
-            message += f" Assigned to {new_user['block']}."
-
-        return True, message
+        if generated_id:
+            return True, f"Account created successfully. ID number: {generated_id}"
+        return True, "Account created successfully."
 
     except OSError as error:
         data_store["users"].remove(new_user)
+        if counter_key is not None:
+            if previous_counter is None:
+                counters.pop(counter_key, None)
+            else:
+                counters[counter_key] = previous_counter
+            if isinstance(original_counters, dict):
+                settings["account_id_counters"] = original_counters
+            else:
+                settings.pop("account_id_counters", None)
         return False, f"Unable to save account: {error}"
+
+
+def next_account_id(role):
+    """Return the next role-specific ID and its persisted sequence state."""
+    id_config = {
+        "Student": ("C", "student_id"),
+        "Teacher": ("T", "teacher_id"),
+    }
+    prefix, field = id_config[role]
+    school_year_start = current_school_year().split("-", 1)[0]
+    year = (
+        school_year_start[-2:]
+        if school_year_start.isdigit()
+        else str(datetime.now().year)[-2:]
+    )
+    id_prefix = f"{prefix}{year}-"
+    counter_key = f"{prefix}{year}"
+    counters = data_store.get("settings", {}).get("account_id_counters", {})
+    try:
+        saved_sequence = max(
+            0,
+            int(counters.get(counter_key, 0))
+        ) if isinstance(counters, dict) else 0
+    except (TypeError, ValueError):
+        saved_sequence = 0
+    highest_existing = 0
+
+    for user in data_store.get("users", []):
+        if not isinstance(user, dict):
+            continue
+        value = str(user.get(field, "")).strip()
+        if not value.startswith(id_prefix):
+            continue
+        sequence = value[len(id_prefix):]
+        if sequence.isdigit():
+            highest_existing = max(highest_existing, int(sequence))
+
+    sequence_number = max(saved_sequence, highest_existing) + 1
+    return (
+        f"{id_prefix}{sequence_number:04d}",
+        counter_key,
+        sequence_number
+    )
+
+
+def account_id_of(username):
+    """Return the generated school ID for a student or teacher account."""
+    user = find_user(username)
+    if user is None:
+        return ""
+    field = "teacher_id" if user.get("role", "").lower() == "teacher" else "student_id"
+    return str(user.get(field, "")).strip()
 
 
 def clean_subject_list(subjects):
@@ -1126,7 +1360,6 @@ def update_user(
         "full_name": user.get("full_name", ""),
         "role": user.get("role", ""),
         "student_id": str(user.get("student_id", "")).strip(),
-        "block": user.get("block", ""),
         "subjects": clean_subject_list(user.get("subjects", []))
     }
 
@@ -1135,25 +1368,17 @@ def update_user(
     if student_id is not None:
         target_role = (role or previous["role"]).lower()
 
-        if target_role in ("student", "teacher"):
-            if target_role != previous["role"].lower():
-                cleaned_id = next_account_id(role, data_store["users"])
-            elif not str(student_id).strip():
-                cleaned_id = (
-                    previous["student_id"]
-                    or next_account_id(role, data_store["users"])
+        if target_role == "student":
+            cleaned_id, error = clean_student_id(student_id)
+
+            if error:
+                return False, error
+
+            if student_id_taken(cleaned_id, user_id):
+                return False, (
+                    f"ID number '{cleaned_id}' is already used "
+                    "by another student."
                 )
-            elif target_role == "student":
-                cleaned_id, error = clean_student_id(student_id)
-
-                if error:
-                    return False, error
-
-                if student_id_taken(cleaned_id, user_id):
-                    return False, (
-                        f"ID number '{cleaned_id}' is already used "
-                        "by another student."
-                    )
 
         else:
             cleaned_id = ""
@@ -1163,18 +1388,6 @@ def update_user(
 
     if role:
         user["role"] = role
-
-    target_role = (role or previous["role"]).lower()
-    if target_role == "student":
-        block = previous["block"]
-
-        if block not in STUDENT_BLOCKS:
-            block = random.choice(STUDENT_BLOCKS)
-    else:
-        block = ""
-
-    if block != previous["block"]:
-        user["block"] = block
 
     changes = []
 
@@ -1186,9 +1399,6 @@ def update_user(
 
     if role and previous["role"] != role:
         changes.append("role")
-
-    if block != previous["block"]:
-        changes.append("student block")
 
     if new_password:
         user["password"] = hash_password(new_password)
@@ -1229,7 +1439,6 @@ def update_user(
         user["username"] = previous["username"]
         user["role"] = previous["role"]
         user["student_id"] = previous["student_id"]
-        user["block"] = previous["block"]
 
         return False, f"Unable to save the account: {error}"
 
@@ -1421,40 +1630,49 @@ def clean_assessment_block(block):
 
 
 def compute_term_grade(cleaned):
-    """Compute the weighted term grade.
+    """Compute the weighted term grade using the official SMCII formula.
 
-    Activities and quizzes form the written works category at 30%, the exam
-    is 30%, and the performance task is 40%.
+    The activities and quizzes component is the average of the activity and
+    quiz scores, multiplied by 30%. The exam contributes 30% and the
+    performance task contributes 40%.
     """
 
-    categories = {}
-
-    written_works = []
-    written_works.extend((cleaned or {}).get("activities") or [])
-    written_works.extend((cleaned or {}).get("quizzes") or [])
-
-    if written_works:
-        categories["written_works"] = (
-            sum(written_works) / len(written_works)
-        )
-
-    for key in ("exams", "performance_tasks"):
-        scores = (cleaned or {}).get(key) or []
-
-        if scores:
-            categories[key] = sum(scores) / len(scores)
-
-    if not categories:
+    if not isinstance(cleaned, dict):
         return None
 
-    total_weight = sum(ASSESSMENT_WEIGHTS[key] for key in categories)
+    activities = (cleaned.get("activities") or [])
+    quizzes = (cleaned.get("quizzes") or [])
+    exams = (cleaned.get("exams") or [])
+    performance_tasks = (cleaned.get("performance_tasks") or [])
 
-    weighted = sum(
-        categories[key] * ASSESSMENT_WEIGHTS[key]
-        for key in categories
+    activity_average = (
+        sum(activities) / len(activities)
+        if activities else 0.0
+    )
+    quiz_average = (
+        sum(quizzes) / len(quizzes)
+        if quizzes else 0.0
+    )
+    exam_average = (
+        sum(exams) / len(exams)
+        if exams else 0.0
+    )
+    performance_average = (
+        sum(performance_tasks) / len(performance_tasks)
+        if performance_tasks else 0.0
     )
 
-    return round(weighted / total_weight, 2)
+    written_works_component = ((activity_average + quiz_average) / 2.0) * 0.30
+    exam_component = exam_average * 0.30
+    performance_component = performance_average * 0.40
+
+    final_percentage = (
+        written_works_component
+        + exam_component
+        + performance_component
+    )
+
+    return round(final_percentage, 2)
 
 
 def assessment_type_average(cleaned, key):
@@ -1500,40 +1718,136 @@ def overall_grade_for_terms(terms):
     return round(sum(values) / len(values), 2)
 
 
-def college_grade_for_percentage(percentage):
-    """Convert a percentage grade to the configured college grade scale."""
+def calculate_assessment_percentage(points_earned, total_points):
+    """Return the percentage for a single assessment tally item."""
+    try:
+        earned = float(points_earned)
+        total = float(total_points)
+    except (TypeError, ValueError):
+        return None
+
+    if total <= 0:
+        return None
+
+    if earned < 0 or earned > total:
+        return None
+
+    return round((earned / total) * 100.0, 2)
+
+
+def category_key_for_assessment(category):
+    normalized = normalize_assessment_category(category)
+    mapping = {
+        "Activity": "activities",
+        "Quiz": "quizzes",
+        "Exam": "exams",
+        "Performance Task": "performance_tasks",
+    }
+    return mapping.get(normalized, "activities")
+
+
+def category_percentage_for_records(records):
+    """Aggregate category scores using total points earned divided by total points possible."""
+    if not records:
+        return None
+
+    total_earned = 0.0
+    total_possible = 0.0
+
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        try:
+            points = float(record.get("points_earned", 0.0))
+            total = float(record.get("possible_points", 0.0))
+        except (TypeError, ValueError):
+            continue
+        if total <= 0:
+            continue
+        total_earned += points
+        total_possible += total
+
+    if total_possible <= 0:
+        return None
+
+    return round((total_earned / total_possible) * 100.0, 2)
+
+
+def tally_term_grade_for_student(student_username, subject, semester=None, school_year=None, grading_period=None):
+    """Compute a term grade preview from tally records using the official SMCII weights."""
+    selected_semester = normalize_semester_name(semester) if semester else None
+    selected_year = normalize_school_year(school_year) if school_year else None
+    selected_period = normalize_grading_period(grading_period) if grading_period else None
+
+    records = assessment_records_for_student(
+        student_username,
+        subject=subject,
+        semester=selected_semester,
+        school_year=selected_year,
+        grading_period=selected_period,
+    )
+
+    if not records:
+        return None
+
+    category_map = {}
+    for record in records:
+        category = record.get("category", "Activity")
+        category_map.setdefault(category, []).append(record)
+
+    activity_pct = category_percentage_for_records(category_map.get("Activity", []))
+    quiz_pct = category_percentage_for_records(category_map.get("Quiz", []))
+    exam_pct = category_percentage_for_records(category_map.get("Exam", []))
+    performance_pct = category_percentage_for_records(category_map.get("Performance Task", []))
+
+    if any(value is None for value in (activity_pct, quiz_pct, exam_pct, performance_pct)):
+        return None
+
+    combined_written_works = ((activity_pct + quiz_pct) / 2.0) * 0.30
+    exam_component = exam_pct * 0.30
+    performance_component = performance_pct * 0.40
+
+    return round(combined_written_works + exam_component + performance_component, 2)
+
+
+def grade_point_equivalent(percentage):
+    """Map a percentage score to the official SMCII grade point scale.
+
+    Decimal percentages are handled by their exact value against the official
+    lower-bound cutoffs shown in the SMCII table. The percentage is not rounded
+    before conversion.
+    """
 
     if not isinstance(percentage, (int, float)):
         return None
 
-    for minimum, grade_point in COLLEGE_GRADE_BANDS:
-        if percentage >= minimum:
-            return grade_point
+    value = float(percentage)
+
+    if value < 0:
+        value = 0.0
+    elif value > 100:
+        value = 100.0
+
+    if 96.0 <= value <= 100.0:
+        return 1.00
+    if 94.0 <= value < 96.0:
+        return 1.25
+    if 91.0 <= value < 94.0:
+        return 1.50
+    if 88.0 <= value < 91.0:
+        return 1.75
+    if 85.0 <= value < 88.0:
+        return 2.00
+    if 83.0 <= value < 85.0:
+        return 2.25
+    if 80.0 <= value < 83.0:
+        return 2.50
+    if 78.0 <= value < 80.0:
+        return 2.75
+    if 75.0 <= value < 78.0:
+        return 3.00
 
     return 5.00
-
-
-def format_college_grade(percentage):
-    """Format a stored percentage as a college grade point."""
-
-    grade_point = college_grade_for_percentage(percentage)
-
-    if grade_point is None:
-        return "—"
-
-    return f"{grade_point:.2f}"
-
-
-def minimum_percentage_for_college_grade(grade_point):
-    """Return the minimum percentage needed to meet a target grade point."""
-
-    qualifying_bands = [
-        minimum
-        for minimum, point in COLLEGE_GRADE_BANDS
-        if point <= grade_point
-    ]
-
-    return min(qualifying_bands, default=0)
 
 
 def validate_assessments(assessments):
@@ -1608,6 +1922,246 @@ def find_student_by_reference(reference):
     return find_student_by_id(needle)
 
 
+def current_school_year():
+    settings = data_store.get("settings", {})
+    return normalize_school_year(settings.get("school_year"))
+
+
+def current_semester():
+    settings = data_store.get("settings", {})
+    return normalize_semester_name(settings.get("current_semester"))
+
+
+def semester_status_for(semester=None, school_year=None):
+    selected = normalize_semester_name(semester or current_semester())
+    settings = data_store.get("settings", {})
+    statuses = settings.get("semester_statuses")
+
+    if not isinstance(statuses, dict):
+        statuses = {}
+
+    for name in SEMESTER_NAMES:
+        statuses.setdefault(name, "Not Started")
+
+    settings["semester_statuses"] = statuses
+    return statuses.get(selected, "Not Started")
+
+
+def set_semester_status(semester, status, actor="system", reason=""):
+    selected = normalize_semester_name(semester)
+    valid = ["Not Started", "In Progress", "Completed", "Reopened"]
+    status_name = str(status or "").strip()
+
+    if status_name not in valid:
+        return False, "Choose a valid semester status."
+
+    settings = data_store.get("settings", {})
+    statuses = settings.get("semester_statuses", {})
+    if not isinstance(statuses, dict):
+        statuses = {}
+    statuses[selected] = status_name
+    settings["semester_statuses"] = statuses
+    settings["current_semester"] = selected
+
+    try:
+        save_data()
+        commit_activity(
+            "Semester status updated",
+            (
+                f"{selected} marked as {status_name}. "
+                f"{reason or 'No reason provided.'}"
+            ),
+            actor,
+        )
+        return True, f"{selected} status updated to {status_name}."
+    except OSError as error:
+        return False, f"Unable to save semester status: {error}"
+
+
+def semester_open_for_entry(semester=None, school_year=None):
+    selected = normalize_semester_name(semester or current_semester())
+    status = semester_status_for(selected, school_year)
+
+    if selected == "Second Semester":
+        if semester_status_for("First Semester", school_year) == "Not Started":
+            return False, "First Semester must be started before Second Semester grade entry is unlocked."
+
+    if status == "Completed":
+        return False, f"{selected} is currently locked. Please contact the administrator."
+
+    if status == "Not Started":
+        return False, f"{selected} has not started yet."
+
+    if status == "Reopened":
+        return True, "Grade entry is available after the administrator reopened the semester."
+
+    return True, "Grade entry is available."
+
+
+def semester_is_locked(semester=None):
+    selected = normalize_semester_name(semester or current_semester())
+    return semester_status_for(selected) == "Completed"
+
+
+def semester_completion_status(semester=None, school_year=None):
+    selected = normalize_semester_name(semester or current_semester())
+    requirement_year = normalize_school_year(school_year or current_school_year())
+    missing = []
+    all_students = users_by_role("Student")
+    subject_names = list(data_store.get("subjects", []))
+
+    for student in all_students:
+        username = student.get("username", "")
+        for subject in subject_names:
+            record = find_grade_record(username, subject, semester=selected, school_year=requirement_year)
+            if record is None:
+                missing.append({
+                    "student": username,
+                    "subject": subject,
+                    "reason": "No grade record saved",
+                    "semester": selected,
+                    "school_year": requirement_year,
+                })
+                continue
+            terms = record.get("terms", {})
+            for term in TERM_NAMES:
+                block = terms.get(term)
+                if not isinstance(block, dict):
+                    missing.append({
+                        "student": username,
+                        "subject": subject,
+                        "reason": f"Missing {term} grade",
+                        "semester": selected,
+                        "school_year": requirement_year,
+                    })
+                    break
+                if "term_grade" not in block:
+                    missing.append({
+                        "student": username,
+                        "subject": subject,
+                        "reason": f"Missing {term} grade",
+                        "semester": selected,
+                        "school_year": requirement_year,
+                    })
+                    break
+
+    return {
+        "semester": selected,
+        "school_year": requirement_year,
+        "status": semester_status_for(selected),
+        "complete": not missing,
+        "missing": missing,
+        "students_total": len(all_students),
+        "subjects_total": len(subject_names),
+    }
+
+
+def start_semester(semester, admin_username, reason=""):
+    selected = normalize_semester_name(semester)
+    if not admin_username:
+        return False, "Administrator username is required."
+    admin = find_user(admin_username)
+    if admin is None or admin.get("role", "").lower() != "admin":
+        return False, "Only an administrator can start a semester."
+
+    status = semester_status_for(selected)
+    if status == "In Progress":
+        return False, f"{selected} is already in progress."
+    if status == "Completed":
+        return False, f"{selected} has already been completed."
+
+    if selected == "Second Semester":
+        if semester_status_for("First Semester") == "Not Started":
+            return False, "First Semester must be started before Second Semester can be started."
+
+    success, message = set_semester_status(
+        selected,
+        "In Progress",
+        actor=admin_username,
+        reason=reason or "Semester started by administrator."
+    )
+    if success:
+        log_activity(
+            "Semester started",
+            f"{selected} for {current_school_year()} started by {admin_username}. {reason or 'No reason provided.'}",
+            actor=admin_username,
+        )
+        return True, f"{selected} started successfully."
+    return False, message
+
+
+def complete_semester(semester, admin_username, reason=""):
+    selected = normalize_semester_name(semester)
+    if not admin_username:
+        return False, "Administrator username is required."
+    admin = find_user(admin_username)
+    if admin is None or admin.get("role", "").lower() != "admin":
+        return False, "Only an administrator can complete a semester."
+
+    status = semester_status_for(selected)
+    if status == "Not Started":
+        return False, f"{selected} must be started before it can be completed."
+    if status == "Completed":
+        return False, f"{selected} is already completed."
+    if status == "Reopened":
+        pass
+
+    if selected == "Second Semester" and semester_status_for("First Semester") != "Completed":
+        return False, "First Semester must be completed before Second Semester can be completed."
+
+    completion_report = semester_completion_status(selected)
+    if not completion_report["complete"]:
+        preview = ", ".join(
+            f"{item['student']} / {item['subject']} ({item['reason']})"
+            for item in completion_report["missing"][:5]
+        )
+        return False, (
+            "Semester completion is blocked because required grades are missing. "
+            f"Examples: {preview or 'No details available.'}"
+        )
+
+    success, message = set_semester_status(
+        selected,
+        "Completed",
+        actor=admin_username,
+        reason=reason or "Semester completion approved."
+    )
+    if success:
+        log_activity(
+            "Semester completed",
+            f"{selected} for {current_school_year()} completed by {admin_username}. {reason or 'No reason provided.'}",
+            actor=admin_username,
+        )
+        return True, message
+    return False, message
+
+
+def reopen_semester(semester, admin_username, reason=""):
+    selected = normalize_semester_name(semester)
+    if not admin_username:
+        return False, "Administrator username is required."
+    admin = find_user(admin_username)
+    if admin is None or admin.get("role", "").lower() != "admin":
+        return False, "Only an administrator can reopen a semester."
+    if not reason.strip():
+        return False, "A reopening reason is required."
+
+    success, message = set_semester_status(
+        selected,
+        "Reopened",
+        actor=admin_username,
+        reason=reason,
+    )
+    if success:
+        log_activity(
+            "Semester reopened",
+            f"{selected} for {current_school_year()} reopened by {admin_username}. Reason: {reason}",
+            actor=admin_username,
+        )
+        return True, message
+    return False, message
+
+
 def student_id_of(username):
     """Return the ID number of a student account."""
 
@@ -1652,21 +2206,347 @@ def clean_student_id(student_id):
     return cleaned, None
 
 
-def find_grade_record(student_username, subject):
+def find_grade_record(student_username, subject, semester=None, school_year=None):
     """Return the grade record of a student in a subject."""
 
-    student_username = student_username.strip().lower()
-    subject = subject.strip().lower()
+    student_username = (student_username or "").strip().lower()
+    subject_name = (subject or "").strip()
+    semester_name = normalize_semester_name(semester) if semester else None
+    selected_year = normalize_school_year(school_year) if school_year else None
 
-    return next(
-        (
-            grade for grade in data_store["grades"]
-            if grade.get("student_username", "").lower()
-            == student_username
-            and grade.get("subject", "").strip().lower() == subject
-        ),
-        None
+    matches = []
+    for grade in data_store["grades"]:
+        if grade.get("student_username", "").strip().lower() != student_username:
+            continue
+        if grade.get("subject", "").strip().lower() != subject_name.strip().lower():
+            continue
+        if semester_name is not None:
+            actual = normalize_semester_name(grade.get("semester"))
+            if actual != semester_name:
+                continue
+        if selected_year is not None:
+            if normalize_school_year(grade.get("school_year")) != selected_year:
+                continue
+        matches.append(grade)
+
+    if not matches:
+        return None
+
+    return matches[0]
+
+
+def assessment_records_for_student(student_username, subject="", semester=None, school_year=None, grading_period=None, category=None):
+    """Return tally records for one student, optionally filtered by subject and context."""
+    username = (student_username or "").strip().lower()
+    subject_name = (subject or "").strip()
+    selected_semester = normalize_semester_name(semester) if semester else None
+    selected_year = normalize_school_year(school_year) if school_year else None
+    selected_period = normalize_grading_period(grading_period) if grading_period else None
+    selected_category = normalize_assessment_category(category) if category else None
+
+    records = []
+    for record in data_store.get("assessment_scores", []):
+        if not isinstance(record, dict):
+            continue
+        if record.get("student_username", "").strip().lower() != username:
+            continue
+        if subject_name and record.get("subject", "").strip().lower() != subject_name.lower():
+            continue
+        if selected_semester is not None and normalize_semester_name(record.get("semester")) != selected_semester:
+            continue
+        if selected_year is not None and normalize_school_year(record.get("school_year")) != selected_year:
+            continue
+        if selected_period is not None and normalize_grading_period(record.get("grading_period")) != selected_period:
+            continue
+        if selected_category is not None and normalize_assessment_category(record.get("category")) != selected_category:
+            continue
+        records.append(record)
+
+    return sorted(records, key=lambda item: (item.get("subject", "").lower(), item.get("grading_period", ""), item.get("id", 0)))
+
+
+def assessment_records_for_teacher(teacher_username, student_username="", subject="", semester=None, school_year=None, grading_period=None):
+    """Return tally records for a teacher and optional filters."""
+    teacher = (teacher_username or "").strip().lower()
+    student = (student_username or "").strip().lower()
+    subject_name = (subject or "").strip()
+    selected_semester = normalize_semester_name(semester) if semester else None
+    selected_year = normalize_school_year(school_year) if school_year else None
+    selected_period = normalize_grading_period(grading_period) if grading_period else None
+
+    records = []
+    for record in data_store.get("assessment_scores", []):
+        if not isinstance(record, dict):
+            continue
+        if record.get("teacher_username", "").strip().lower() != teacher:
+            continue
+        if student and record.get("student_username", "").strip().lower() != student:
+            continue
+        if subject_name and record.get("subject", "").strip().lower() != subject_name.lower():
+            continue
+        if selected_semester is not None and normalize_semester_name(record.get("semester")) != selected_semester:
+            continue
+        if selected_year is not None and normalize_school_year(record.get("school_year")) != selected_year:
+            continue
+        if selected_period is not None and normalize_grading_period(record.get("grading_period")) != selected_period:
+            continue
+        records.append(record)
+
+    return sorted(records, key=lambda item: (item.get("student_username", "").lower(), item.get("subject", "").lower(), item.get("id", 0)))
+
+
+def validate_assessment_tally(student_username, subject, assessment_name, category, points_earned, total_points, semester=None, school_year=None, grading_period=None):
+    """Validate a single tally record before it is saved."""
+    student = find_student((student_username or "").strip())
+    if student is None:
+        return None, "Student account not found."
+
+    name = str(assessment_name or "").strip()
+    if not name:
+        return None, "Enter an assessment name."
+
+    if not str(subject or "").strip():
+        return None, "Select a subject."
+
+    selected_category = normalize_assessment_category(category)
+    if selected_category not in {"Activity", "Quiz", "Exam", "Performance Task"}:
+        return None, "Choose a valid assessment category."
+
+    try:
+        earned = float(points_earned)
+        total = float(total_points)
+    except (TypeError, ValueError):
+        return None, "Points earned and total possible points must be numbers."
+
+    if earned < 0:
+        return None, "Points earned cannot be less than zero."
+
+    if total <= 0:
+        return None, "Total possible points must be greater than zero."
+
+    if earned > total:
+        return None, "Points earned cannot exceed the total possible points."
+
+    selected_semester = normalize_semester_name(semester or current_semester())
+    selected_year = normalize_school_year(school_year or current_school_year())
+    selected_period = normalize_grading_period(grading_period or TERM_NAMES[0])
+
+    allowed, message = semester_open_for_entry(selected_semester, selected_year)
+    if not allowed:
+        return None, message
+
+    return {
+        "student_username": student["username"],
+        "subject": str(subject).strip(),
+        "assessment_name": name,
+        "category": selected_category,
+        "points_earned": earned,
+        "possible_points": total,
+        "semester": selected_semester,
+        "school_year": selected_year,
+        "grading_period": selected_period,
+        "percentage": calculate_assessment_percentage(earned, total),
+    }, None
+
+
+def add_assessment_score(
+    student_username,
+    subject,
+    assessment_name,
+    category,
+    points_earned,
+    total_points,
+    teacher_username="",
+    actor="system",
+    semester=None,
+    school_year=None,
+    grading_period=None,
+):
+    """Add one assessment score entry for a student."""
+    payload, error = validate_assessment_tally(
+        student_username,
+        subject,
+        assessment_name,
+        category,
+        points_earned,
+        total_points,
+        semester=semester,
+        school_year=school_year,
+        grading_period=grading_period,
     )
+    if error:
+        return False, error
+
+    duplicate = next(
+        (
+            record for record in data_store.get("assessment_scores", [])
+            if record.get("student_username", "").strip().lower() == payload["student_username"].lower()
+            and record.get("subject", "").strip().lower() == payload["subject"].lower()
+            and record.get("category", "") == payload["category"]
+            and record.get("assessment_name", "").strip().lower() == payload["assessment_name"].lower()
+            and normalize_semester_name(record.get("semester")) == payload["semester"]
+            and normalize_school_year(record.get("school_year")) == payload["school_year"]
+            and normalize_grading_period(record.get("grading_period")) == payload["grading_period"]
+        ),
+        None,
+    )
+
+    if duplicate is not None:
+        return False, "This assessment tally already exists. Edit the existing record instead."
+
+    record = {
+        "id": next_id(data_store.get("assessment_scores", [])),
+        "student_username": payload["student_username"],
+        "subject": payload["subject"],
+        "teacher_username": (teacher_username or "").strip(),
+        "assessment_name": payload["assessment_name"],
+        "category": payload["category"],
+        "points_earned": payload["points_earned"],
+        "possible_points": payload["possible_points"],
+        "semester": payload["semester"],
+        "school_year": payload["school_year"],
+        "grading_period": payload["grading_period"],
+        "percentage": payload["percentage"],
+        "updated_at": timestamp(),
+    }
+
+    data_store["assessment_scores"].append(record)
+
+    try:
+        save_data()
+        commit_activity(
+            "Assessment score added",
+            (
+                f"{record['student_username']} - {record['subject']} - "
+                f"{record['assessment_name']} ({record['category']}) "
+                f"{record['points_earned']}/{record['possible_points']} = {record['percentage']}%"
+            ),
+            actor or teacher_username or "system",
+        )
+        return True, "Assessment score added successfully."
+    except OSError as error:
+        data_store["assessment_scores"].remove(record)
+        return False, f"Unable to save assessment score: {error}"
+
+
+def edit_assessment_score(
+    record_id,
+    student_username,
+    subject,
+    assessment_name,
+    category,
+    points_earned,
+    total_points,
+    teacher_username="",
+    actor="system",
+    semester=None,
+    school_year=None,
+    grading_period=None,
+):
+    """Update an existing tally record."""
+    record = next(
+        (item for item in data_store.get("assessment_scores", []) if item.get("id") == record_id),
+        None,
+    )
+    if record is None:
+        return False, "Assessment score record not found."
+
+    payload, error = validate_assessment_tally(
+        student_username,
+        subject,
+        assessment_name,
+        category,
+        points_earned,
+        total_points,
+        semester=semester or record.get("semester"),
+        school_year=school_year or record.get("school_year"),
+        grading_period=grading_period or record.get("grading_period"),
+    )
+    if error:
+        return False, error
+
+    record["student_username"] = payload["student_username"]
+    record["subject"] = payload["subject"]
+    record["teacher_username"] = (teacher_username or record.get("teacher_username", "")).strip()
+    record["assessment_name"] = payload["assessment_name"]
+    record["category"] = payload["category"]
+    record["points_earned"] = payload["points_earned"]
+    record["possible_points"] = payload["possible_points"]
+    record["semester"] = payload["semester"]
+    record["school_year"] = payload["school_year"]
+    record["grading_period"] = payload["grading_period"]
+    record["percentage"] = payload["percentage"]
+    record["updated_at"] = timestamp()
+
+    try:
+        save_data()
+        commit_activity(
+            "Assessment score updated",
+            (
+                f"{record['student_username']} - {record['subject']} - "
+                f"{record['assessment_name']} ({record['category']}) "
+                f"{record['points_earned']}/{record['possible_points']} = {record['percentage']}%"
+            ),
+            actor or teacher_username or "system",
+        )
+        return True, "Assessment score updated."
+    except OSError as error:
+        return False, f"Unable to save assessment score: {error}"
+
+
+def delete_assessment_score(record_id, actor="system"):
+    """Delete one assessment tally record."""
+    record = next(
+        (item for item in data_store.get("assessment_scores", []) if item.get("id") == record_id),
+        None,
+    )
+    if record is None:
+        return False, "Assessment score record not found."
+
+    data_store["assessment_scores"].remove(record)
+
+    try:
+        save_data()
+        commit_activity(
+            "Assessment score deleted",
+            (
+                f"{record.get('student_username', '')} - {record.get('subject', '')} - "
+                f"{record.get('assessment_name', '')} ({record.get('category', '')})"
+            ),
+            actor,
+        )
+        return True, "Assessment score deleted."
+    except OSError as error:
+        data_store["assessment_scores"].append(record)
+        return False, f"Unable to delete assessment score: {error}"
+
+
+def all_assessment_scores(student="", subject="", teacher="", semester=None, school_year=None, grading_period=None):
+    """Query all tally records with optional filters."""
+    records = list(data_store.get("assessment_scores", []))
+    selected_semester = normalize_semester_name(semester) if semester else None
+    selected_year = normalize_school_year(school_year) if school_year else None
+    selected_period = normalize_grading_period(grading_period) if grading_period else None
+
+    filtered = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        if student and record.get("student_username", "").strip().lower() not in student.strip().lower():
+            continue
+        if subject and record.get("subject", "").strip().lower() not in subject.strip().lower():
+            continue
+        if teacher and record.get("teacher_username", "").strip().lower() not in teacher.strip().lower():
+            continue
+        if selected_semester is not None and normalize_semester_name(record.get("semester")) != selected_semester:
+            continue
+        if selected_year is not None and normalize_school_year(record.get("school_year")) != selected_year:
+            continue
+        if selected_period is not None and normalize_grading_period(record.get("grading_period")) != selected_period:
+            continue
+        filtered.append(record)
+
+    return sorted(filtered, key=lambda item: item.get("id", 0), reverse=True)
 
 
 def add_grade(
@@ -1674,7 +2554,9 @@ def add_grade(
     subject,
     assessments,
     teacher_username="",
-    actor="system"
+    actor="system",
+    semester=None,
+    school_year=None,
 ):
     student_username = student_username.strip()
     subject = subject.strip()
@@ -1699,6 +2581,8 @@ def add_grade(
         "student_username": student["username"],
         "subject": subject,
         "teacher_username": teacher_username.strip(),
+        "semester": normalize_semester_name(semester or current_semester()),
+        "school_year": normalize_school_year(school_year or current_school_year()),
         "terms": cleaned,
         "final_grade": overall_grade,
         "terms_completed": len(TERM_NAMES),
@@ -1713,8 +2597,7 @@ def add_grade(
             "Grade record saved",
             (
                 f"{student['username']} - {subject} "
-                f"overall college grade "
-                f"{format_college_grade(overall_grade)} "
+                f"overall {overall_grade:.2f} "
                 f"by {teacher_username or 'system'}"
             ),
             actor
@@ -1722,8 +2605,7 @@ def add_grade(
 
         return True, (
             "Grades saved successfully.\n"
-            f"Overall college grade: "
-            f"{format_college_grade(overall_grade)}"
+            f"Overall grade: {overall_grade:.2f}"
         )
 
     except OSError as error:
@@ -1737,7 +2619,9 @@ def save_term_grade(
     term,
     assessments,
     teacher_username="",
-    actor="system"
+    actor="system",
+    semester=None,
+    school_year=None,
 ):
     """Save the assessment scores of a single term.
 
@@ -1760,12 +2644,18 @@ def save_term_grade(
     if student is None:
         return False, "Student account not found."
 
+    selected_semester = normalize_semester_name(semester or current_semester())
+    selected_year = normalize_school_year(school_year or current_school_year())
+    can_enter, message = semester_open_for_entry(selected_semester, selected_year)
+    if not can_enter:
+        return False, message
+
     cleaned, error = clean_assessment_block(assessments)
 
     if error:
         return False, error
 
-    record = find_grade_record(student["username"], subject)
+    record = find_grade_record(student["username"], subject, selected_semester, selected_year)
 
     created = record is None
 
@@ -1775,6 +2665,8 @@ def save_term_grade(
             "student_username": student["username"],
             "subject": subject,
             "teacher_username": teacher_username.strip(),
+            "semester": selected_semester,
+            "school_year": selected_year,
             "terms": {},
             "final_grade": None,
             "terms_completed": 0,
@@ -1796,6 +2688,8 @@ def save_term_grade(
     if teacher_username.strip():
         record["teacher_username"] = teacher_username.strip()
 
+    record["semester"] = selected_semester
+    record["school_year"] = selected_year
     record["final_grade"] = overall_grade_for_terms(record["terms"])
     record["terms_completed"] = len(completed_term_grades(record["terms"]))
     record["updated_at"] = timestamp()
@@ -1843,8 +2737,7 @@ def save_term_grade(
             "Term grade saved",
             (
                 f"{student['username']} - {subject} - {term} "
-                f"college grade "
-                f"{format_college_grade(cleaned['term_grade'])} "
+                f"grade {cleaned['term_grade']:.2f} "
                 f"by {teacher_username or 'system'}"
             ),
             actor
@@ -1853,10 +2746,8 @@ def save_term_grade(
         completed = record["terms_completed"]
 
         return True, (
-            f"{term} college grade saved: "
-            f"{format_college_grade(cleaned['term_grade'])}\n"
-            f"Overall college grade: "
-            f"{format_college_grade(record['final_grade'])} "
+            f"{term} grade saved: {cleaned['term_grade']:.2f}\n"
+            f"Overall grade: {record['final_grade']:.2f} "
             f"({completed} of {len(TERM_NAMES)} terms complete)"
         )
 
@@ -1913,10 +2804,12 @@ def delete_grade(record_id, actor="system"):
         return False, f"Unable to delete the record: {error}"
 
 
-def student_performance(username):
+def student_performance(username, semester=None, school_year=None):
     """Build the performance summary of a student."""
 
-    records = grades_for_student(username)
+    selected_semester = normalize_semester_name(semester) if semester else None
+    selected_year = normalize_school_year(school_year) if school_year else None
+    records = grades_for_student(username, selected_semester, selected_year)
 
     subjects = []
 
@@ -2040,8 +2933,11 @@ def teacher_display_name(username):
     return user.get("full_name", username)
 
 
-def teacher_subject_report(teacher_username, subject=""):
+def teacher_subject_report(teacher_username, subject="", semester=None, school_year=None):
     """Build the class performance list of a teacher."""
+
+    selected_semester = normalize_semester_name(semester) if semester else None
+    selected_year = normalize_school_year(school_year) if school_year else None
 
     records = [
         grade for grade in data_store["grades"]
@@ -2051,6 +2947,14 @@ def teacher_subject_report(teacher_username, subject=""):
             not subject
             or grade.get("subject", "").strip().lower()
             == subject.strip().lower()
+        )
+        and (
+            selected_semester is None
+            or normalize_semester_name(grade.get("semester")) == selected_semester
+        )
+        and (
+            selected_year is None
+            or normalize_school_year(grade.get("school_year")) == selected_year
         )
     ]
 
@@ -2120,28 +3024,42 @@ def student_display_name(username):
     return user.get("full_name", username)
 
 
-def grades_for_student(username):
-    return sorted(
-        [
-            grade for grade in data_store["grades"]
-            if grade.get("student_username", "").lower()
-            == username.lower()
-        ],
-        key=lambda grade: grade.get("id", 0),
-        reverse=True
-    )
+def grades_for_student(username, semester=None, school_year=None):
+    selected_semester = normalize_semester_name(semester) if semester else None
+    selected_year = normalize_school_year(school_year) if school_year else None
+
+    records = []
+    for grade in data_store["grades"]:
+        if grade.get("student_username", "").lower() != username.lower():
+            continue
+        if selected_semester is not None:
+            if normalize_semester_name(grade.get("semester")) != selected_semester:
+                continue
+        if selected_year is not None:
+            if normalize_school_year(grade.get("school_year")) != selected_year:
+                continue
+        records.append(grade)
+
+    return sorted(records, key=lambda grade: grade.get("id", 0), reverse=True)
 
 
-def grades_for_teacher(username):
-    return sorted(
-        [
-            grade for grade in data_store["grades"]
-            if grade.get("teacher_username", "").lower()
-            == username.lower()
-        ],
-        key=lambda grade: grade.get("id", 0),
-        reverse=True
-    )
+def grades_for_teacher(username, semester=None, school_year=None):
+    selected_semester = normalize_semester_name(semester) if semester else None
+    selected_year = normalize_school_year(school_year) if school_year else None
+
+    records = []
+    for grade in data_store["grades"]:
+        if grade.get("teacher_username", "").lower() != username.lower():
+            continue
+        if selected_semester is not None:
+            if normalize_semester_name(grade.get("semester")) != selected_semester:
+                continue
+        if selected_year is not None:
+            if normalize_school_year(grade.get("school_year")) != selected_year:
+                continue
+        records.append(grade)
+
+    return sorted(records, key=lambda grade: grade.get("id", 0), reverse=True)
 
 
 def all_grade_records(student="", subject="", teacher=""):
@@ -2433,7 +3351,7 @@ def build_user_report():
     ):
         lines.append(_text_row([
             user.get("id", ""),
-            user.get("student_id", "") or "—",
+            account_id_of(user.get("username", "")) or "—",
             user.get("username", ""),
             user.get("full_name", ""),
             user.get("role", ""),
@@ -2499,7 +3417,7 @@ def build_grade_report():
             value = terms.get(term, {}).get("term_grade")
 
             if isinstance(value, (int, float)):
-                values.append(format_college_grade(value))
+                values.append(f"{value:.2f}")
             else:
                 values.append("—")
 
@@ -2509,7 +3427,7 @@ def build_grade_report():
             overall = overall_grade_for_terms(terms)
 
         if isinstance(overall, (int, float)):
-            overall_text = format_college_grade(overall)
+            overall_text = f"{grade_point_equivalent(float(overall)):.2f}"
             status = (
                 "PASSED"
                 if float(overall) >= PASSING_GRADE
@@ -2535,10 +3453,6 @@ def build_grade_report():
     lines.append("")
     lines.append("ASSESSMENT BREAKDOWN")
     lines.append("-" * 78)
-    lines.append(
-        "Assessment input scores are percentages; term and overall grades "
-        "use the college grade-point scale."
-    )
 
     for grade in records:
         terms = grade.get("terms", {})
@@ -2560,8 +3474,7 @@ def build_grade_report():
                 continue
 
             lines.append(
-                f"  {term} - college grade "
-                f"{format_college_grade(block.get('term_grade'))}"
+                f"  {term} - grade {block.get('term_grade', 0):.2f}"
             )
 
             for key in ASSESSMENT_NAMES:
@@ -2603,27 +3516,9 @@ def build_statistics_report():
         ("Teacher subject assignments", stats["subject_assignments"]),
         ("Teachers without a subject", stats["unassigned_teachers"]),
         ("Grade records", stats["total_grades"]),
-        (
-            "Average college grade",
-            (
-                format_college_grade(stats["average_grade"])
-                if stats["total_grades"] else "—"
-            )
-        ),
-        (
-            "Best college grade",
-            (
-                format_college_grade(stats["highest_grade"])
-                if stats["total_grades"] else "—"
-            )
-        ),
-        (
-            "Lowest college grade",
-            (
-                format_college_grade(stats["lowest_grade"])
-                if stats["total_grades"] else "—"
-            )
-        ),
+        ("Average grade", f"{stats['average_grade']:.2f}"),
+        ("Highest grade", f"{stats['highest_grade']:.2f}"),
+        ("Lowest grade", f"{stats['lowest_grade']:.2f}"),
         ("Passing records", stats["passing"]),
         ("Failing records", stats["failing"]),
         ("Pass rate", f"{stats['pass_rate']:.2f}%"),
@@ -2637,14 +3532,7 @@ def build_statistics_report():
     lines.append("PER SUBJECT BREAKDOWN")
     lines.append("-" * 78)
 
-    headers = [
-        "Subject",
-        "Records",
-        "Average GPA",
-        "Best GPA",
-        "Worst GPA",
-        "Passing"
-    ]
+    headers = ["Subject", "Records", "Average", "Highest", "Lowest", "Passing"]
     widths = [24, 8, 9, 9, 8, 8]
 
     lines.append(_text_row(headers, widths))
@@ -2653,9 +3541,9 @@ def build_statistics_report():
         lines.append(_text_row([
             item["subject"],
             item["records"],
-            format_college_grade(item["average"]),
-            format_college_grade(item["highest"]),
-            format_college_grade(item["lowest"]),
+            f"{item['average']:.2f}",
+            f"{item['highest']:.2f}",
+            f"{item['lowest']:.2f}",
             item["passing"]
         ], widths))
 
@@ -2667,8 +3555,7 @@ def build_statistics_report():
         for index, item in enumerate(stats["top_students"], start=1):
             lines.append(
                 f"{index}. {item['username']} - "
-                f"average college grade "
-                f"{format_college_grade(item['average'])} "
+                f"average {item['average']:.2f} "
                 f"({item['records']} record(s))"
             )
     else:
@@ -2682,8 +3569,7 @@ def build_statistics_report():
         for index, item in enumerate(stats["needs_attention"], start=1):
             lines.append(
                 f"{index}. {item['username']} - "
-                f"average college grade "
-                f"{format_college_grade(item['average'])} "
+                f"average {item['average']:.2f} "
                 f"({item['records']} record(s))"
             )
     else:
