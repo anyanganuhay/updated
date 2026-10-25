@@ -48,6 +48,7 @@ from backend import (
     find_student_by_reference,
     student_id_of,
     account_id_of,
+    next_account_id_preview,
     build_user_report,
     build_grade_report,
     build_statistics_report,
@@ -2785,6 +2786,7 @@ def show_user_management(full_name, admin_username):
 
         entries = {}
         role_choice = {"role": role}
+        id_preview_label = None
 
         field_layout = [
             ("Username", 0, 0),
@@ -2831,13 +2833,14 @@ def show_user_management(full_name, admin_username):
                 sticky="w"
             )
 
-            tk.Label(
+            id_preview_label = tk.Label(
                 form,
-                text="Assigned automatically (C26-0001 format)",
+                text=f"Next ID: {next_account_id_preview('Student')}",
                 bg=SURFACE,
                 fg=MUTED,
                 font=sfont(9, "normal")
-            ).grid(
+            )
+            id_preview_label.grid(
                 row=2,
                 column=1,
                 padx=spad(8),
@@ -2893,10 +2896,12 @@ def show_user_management(full_name, admin_username):
         role_hint = tk.Label(
             form,
             text=(
-                "Student ID is assigned automatically (C26-0001 format)."
+                "ID is assigned automatically."
                 if role == "Student"
-                else "Teacher ID is assigned automatically (T26-0001 format). "
-                     "Hold Ctrl to select several subjects."
+                else (
+                    f"Next ID: {next_account_id_preview('Teacher')}  ·  "
+                    "Hold Ctrl to select several subjects."
+                )
             ),
             bg=SURFACE,
             fg=MUTED,
@@ -2904,6 +2909,8 @@ def show_user_management(full_name, admin_username):
             wraplength=sx(520),
             justify="left"
         )
+        if role == "Teacher":
+            id_preview_label = role_hint
 
         role_hint.grid(
             row=3,
@@ -2956,6 +2963,18 @@ def show_user_management(full_name, admin_username):
 
                 if id_entry is not None:
                     id_entry.delete(0, tk.END)
+
+                if id_preview_label is not None:
+                    id_preview_label.configure(
+                        text=(
+                            f"Next ID: {next_account_id_preview(current_role)}"
+                            if current_role == "Student"
+                            else (
+                                f"Next ID: {next_account_id_preview(current_role)}  ·  "
+                                "Hold Ctrl to select several subjects."
+                            )
+                        )
+                    )
 
                 if subject_list is not None:
                     subject_list.selection_clear(0, tk.END)

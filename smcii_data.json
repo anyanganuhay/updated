@@ -25,6 +25,18 @@
                 "Mathematics"
             ],
             "teacher_id": "T26-0001"
+        },
+        {
+            "id": 3,
+            "username": "C26-0001",
+            "password": "pbkdf2_sha256$120000$71344fc91dadf304932f7471105315a2$3487d21bbf83626424f4b15d380df67edc4d02b3a9832d3f36f643c026f86604",
+            "full_name": "Gian Ganuhay",
+            "role": "Student",
+            "active": true,
+            "protected": false,
+            "student_id": "C26-0001",
+            "teacher_id": "",
+            "subjects": []
         }
     ],
     "grades": [],
@@ -51,6 +63,20 @@
             "actor": "admin",
             "action": "Subject assigned",
             "detail": "Cua assigned to Mathematics"
+        },
+        {
+            "id": 3,
+            "timestamp": "2026-10-26 00:10:55",
+            "actor": "admin",
+            "action": "Account created",
+            "detail": "Gian Ganuhay (C26-0001) added as Student"
+        },
+        {
+            "id": 4,
+            "timestamp": "2026-10-26 00:10:55",
+            "actor": "admin",
+            "action": "Account ID number assigned",
+            "detail": "C26-0001 uses ID number C26-0001"
         }
     ],
     "announcements": [],
@@ -63,7 +89,8 @@
             "Second Semester": "Not Started"
         },
         "account_id_counters": {
-            "T26": 1
+            "T26": 1,
+            "C26": 1
         }
     }
 }

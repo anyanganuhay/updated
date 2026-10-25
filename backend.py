@@ -926,6 +926,7 @@ def add_user(
     subjects=None,
     student_id=""
 ):
+    """Create an account and assign its student or teacher ID automatically."""
     username = username.strip()
     password = password.strip()
     full_name = full_name.strip()
@@ -960,18 +961,8 @@ def add_user(
     next_sequence = None
 
     if role == "Student":
-        if student_id:
-            cleaned_id, error = clean_student_id(student_id)
-            if error:
-                return False, error
-            if student_id_taken(cleaned_id):
-                return False, (
-                    f"ID number '{cleaned_id}' is already used "
-                    "by another student."
-                )
-        else:
-            generated_id, counter_key, next_sequence = next_account_id("Student")
-            cleaned_id = generated_id
+        generated_id, counter_key, next_sequence = next_account_id("Student")
+        cleaned_id = generated_id
     elif role == "Teacher":
         teacher_id, counter_key, next_sequence = next_account_id("Teacher")
         generated_id = teacher_id
@@ -1089,12 +1080,23 @@ def next_account_id(role):
     )
 
 
+def next_account_id_preview(role):
+    """Return the next ID for the enrollment form without reserving it."""
+    return next_account_id(role)[0]
+
+
 def account_id_of(username):
     """Return the generated school ID for a student or teacher account."""
     user = find_user(username)
     if user is None:
         return ""
-    field = "teacher_id" if user.get("role", "").lower() == "teacher" else "student_id"
+    role = user.get("role", "").lower()
+    if role == "teacher":
+        field = "teacher_id"
+    elif role == "student":
+        field = "student_id"
+    else:
+        return ""
     return str(user.get(field, "")).strip()
 
 
